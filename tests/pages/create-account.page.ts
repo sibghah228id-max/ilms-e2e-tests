@@ -45,6 +45,20 @@ export class RoleSelectionPage {
   }
 }
 
+/**
+ * Waits until the portal login page is actually rendered, not just until the URL changed.
+ * The portal is a Next.js app: after a client-side navigation the URL flips to /login
+ * immediately while the page still shows a "Loading..." spinner, so a URL-only assertion
+ * passes before anything visible happens.
+ */
+export async function expectLoginPageRendered(page: Page, loginUrl: string) {
+  await expect(page).toHaveURL((url) => [loginUrl, `${loginUrl}/`].includes(url.href), { timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: /Login to your INDUS Tech Connect account/i })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByRole('button', { name: 'Login', exact: true })).toBeVisible();
+}
+
 export type StudentData = {
   name: string;
   cnic: string;
@@ -97,8 +111,15 @@ export class StudentRegistrationPage {
     return this.page.locator('p').filter({ hasText: text });
   }
 
+  /**
+   * The University field is a react-aria ComboBox: its listbox only opens on real key
+   * presses, so `fill()` sets the value without ever showing the options.
+   */
   async selectUniversity(search: string, option: string) {
-    await this.university.fill(search);
+    await this.university.click();
+    await this.university.clear();
+    await this.page.keyboard.type(search, { delay: 30 });
+    await expect(this.university).toHaveAttribute('aria-expanded', 'true');
     await this.page.getByRole('option', { name: option, exact: true }).click();
     await expect(this.university).toHaveValue(option);
   }
