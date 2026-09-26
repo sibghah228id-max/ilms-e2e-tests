@@ -1,12 +1,18 @@
 import { test, expect } from '@playwright/test';
-import { RoleSelectionPage, ROLES } from '../pages/create-account.page';
+import { RoleSelectionPage, ROLES, expectLoginPageRendered } from '../pages/create-account.page';
 import { ROLE_CONTENT, ACADEMIA_CONTACT_TEXT } from '../data/role-content';
+import { env, portalLoginUrl, websiteUrl, websiteHost } from '../data/environments';
 
 const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Contact Us on the INDUS website of the environment under test, with or without "www.".
+const contactUsPath = new RegExp(`(www\\.)?${escapeRegExp(websiteHost)}/contact-us/?$`);
+const contactUsAbsolute = new RegExp(`^https://(www\\.)?${escapeRegExp(websiteHost)}/contact-us/?$`);
 
 test.describe('Login → Sign Up', () => {
   test('clicking Sign Up on the login page opens /create-account', async ({ page }) => {
-    await page.goto('/login', { waitUntil: 'networkidle' });
+    await page.goto(env.portal.loginPath, { waitUntil: 'networkidle' });
 
     await page.getByRole('link', { name: 'Sign Up', exact: true }).click();
 
@@ -29,7 +35,17 @@ test.describe('Create account — header', () => {
     // The link is deliberately not clicked: it is a Next.js <Link> whose client-side href is "/",
     // so after hydration a click is routed to the portal root and redirects to /login (app bug).
     const href = await rolePage.logoLink.evaluate((a: HTMLAnchorElement) => a.href);
-    expect(href).toBe('https://industechconnect.pk/');
+    expect(href).toBe(`${websiteUrl}/`);
+  });
+
+  test('clicking the INDUS Tech Connect logo redirects to the login page', async ({ page }) => {
+    // The logo is a Next.js <Link> whose client-side target is the portal root, which sends an
+    // unauthenticated user to /login. That in-app redirect is the expected behaviour here, even
+    // though the anchor's href attribute points at the INDUS website (checked above).
+    await rolePage.logoLink.click();
+
+    // Wait for the login form itself: the URL changes while the page still shows "Loading...".
+    await expectLoginPageRendered(page, portalLoginUrl);
   });
 
   test('home icon is shown and links to the portal login page', async ({ page }) => {
@@ -37,7 +53,8 @@ test.describe('Create account — header', () => {
 
     await rolePage.homeLink.click();
 
-    await expect(page).toHaveURL(/portal\.industechconnect\.pk\/login\/?$/);
+    // Home icon lands on the login page of the environment under test (see tests/data/environments.json).
+    await expectLoginPageRendered(page, portalLoginUrl);
   });
 });
 
@@ -101,20 +118,15 @@ test.describe('Create account — role content', () => {
     await rolePage.roleCard('Academia').click();
 
     // Raw attribute — checks the intended destination regardless of the scheme bug below.
-    await expect(rolePage.contactUsLink).toHaveAttribute('href', /(www\.)?industechconnect\.pk\/contact-us\/?$/);
+    await expect(rolePage.contactUsLink).toHaveAttribute('href', contactUsPath);
   });
 
   test('Academia Contact Us resolves to an absolute INDUS URL', async () => {
-    // Known app bug: the href is "industechconnect.pk/contact-us/" with no "https://", so the
-    // browser resolves it as a path on the portal:
-    //   https://portal.industechconnect.pk/industechconnect.pk/contact-us/  (404)
-    // This passes while the bug exists and fails with "expected to fail, but passed" once the
-    // app is fixed — remove the test.fail() then.
-    test.fail();
-
+    // If the href lacks "https://" (e.g. "industechconnect.pk/contact-us/"), the browser resolves
+    // it as a path on the portal and the link 404s, so the resolved URL must be absolute.
     await rolePage.roleCard('Academia').click();
 
     const href = await rolePage.contactUsLink.evaluate((a: HTMLAnchorElement) => a.href);
-    expect(href).toMatch(/^https:\/\/(www\.)?industechconnect\.pk\/contact-us\/?$/);
+    expect(href).toMatch(contactUsAbsolute);
   });
 });

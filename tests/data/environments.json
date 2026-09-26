@@ -1,0 +1,28 @@
+{
+  "staging": {
+    "portal": {
+      "baseUrl": "https://portal-staging.industechconnect.pk",
+      "loginPath": "/login"
+    },
+    "master": {
+      "baseUrl": "https://master-staging.industechconnect.pk",
+      "loginPath": "/securecontroller/login"
+    },
+    "website": {
+      "baseUrl": "https://staging.industechconnect.pk"
+    }
+  },
+  "live": {
+    "portal": {
+      "baseUrl": "https://portal.industechconnect.pk",
+      "loginPath": "/login"
+    },
+    "master": {
+      "baseUrl": "https://master.industechconnect.pk",
+      "loginPath": "/securecontroller/login"
+    },
+    "website": {
+      "baseUrl": "https://industechconnect.pk"
+    }
+  }
+}

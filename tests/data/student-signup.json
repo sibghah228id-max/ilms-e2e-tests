@@ -1,0 +1,24 @@
+{
+  "student": {
+    "namePrefix": "Test Student",
+    "dateOfBirth": "1999-09-12",
+    "gender": "Female",
+    "password": "1234567890",
+    "university": "Air University"
+  },
+  "form": {
+    "placeholders": {
+      "name": "Enter your full name",
+      "cnic": "Enter 13-digit CNIC (no dashes)",
+      "email": "Enter your email address",
+      "phone": "Enter your phone number"
+    },
+    "phoneCountryLabel": "PK | +92"
+  },
+  "otp": {
+    "emailSubject": "INDUS OTP"
+  },
+  "mail": {
+    "apiBaseUrl": "https://api.mail.tm"
+  }
+}
