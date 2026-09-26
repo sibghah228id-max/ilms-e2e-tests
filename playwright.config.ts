@@ -11,6 +11,8 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: process.env.BASE_URL ?? env.portal.baseUrl,
+    // A click blocked by an overlay fails here instead of retrying until the test timeout.
+    actionTimeout: 15_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

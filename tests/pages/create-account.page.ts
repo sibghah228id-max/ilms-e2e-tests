@@ -1,9 +1,6 @@
 import { type Page, type Locator, expect } from '@playwright/test';
-import { ROLE_CONTENT } from '../data/role-content';
 
 export const ROLES = ['IT Student', 'IT Professional', 'IT Company', 'Academia', 'International Company'] as const;
-
-export const IT_STUDENT_BENEFITS = ROLE_CONTENT['IT Student'].benefits;
 
 /** Role-selection step: /create-account */
 export class RoleSelectionPage {
@@ -106,20 +103,27 @@ export class StudentRegistrationPage {
     return input.locator('xpath=..').getByRole('button', { name: /show password|hide password/i });
   }
 
-  /** Validation message rendered below a field (a <p>), so field labels never match. */
-  error(text: string | RegExp): Locator {
-    return this.page.locator('p').filter({ hasText: text });
-  }
-
   /**
    * The University field is a react-aria ComboBox: its listbox only opens on real key
    * presses, so `fill()` sets the value without ever showing the options.
+   *
+   * The options are loaded from the server, so typing before they arrive leaves the listbox
+   * closed. Retype (and nudge with ArrowDown) until it opens, up to 30s in total.
    */
   async selectUniversity(search: string, option: string) {
     await this.university.click();
-    await this.university.clear();
-    await this.page.keyboard.type(search, { delay: 30 });
-    await expect(this.university).toHaveAttribute('aria-expanded', 'true');
+
+    await expect(async () => {
+      await this.university.clear();
+      await this.page.keyboard.type(search, { delay: 30 });
+      const opened = await this.university
+        .getAttribute('aria-expanded')
+        .then((v) => v === 'true')
+        .catch(() => false);
+      if (!opened) await this.page.keyboard.press('ArrowDown');
+      await expect(this.university).toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
+    }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] });
+
     await this.page.getByRole('option', { name: option, exact: true }).click();
     await expect(this.university).toHaveValue(option);
   }
@@ -135,12 +139,4 @@ export class StudentRegistrationPage {
     await this.confirmPassword.fill(data.confirmPassword);
     await this.selectUniversity(data.university.split(' ')[0], data.university);
   }
-}
-
-/** YYYY-MM-DD for the date exactly `years` years before today. */
-export function dateYearsAgo(years: number, extraDays = 0): string {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() - years);
-  d.setDate(d.getDate() + extraDays);
-  return d.toISOString().slice(0, 10);
 }

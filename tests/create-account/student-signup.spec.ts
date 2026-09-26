@@ -1,14 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { RoleSelectionPage, StudentRegistrationPage } from '../pages/create-account.page';
 import { OtpPage } from '../pages/otp.page';
-import { studentSignupData, uniqueStudentData, yopmailInbox } from '../data/student-data';
-import { fetchOtpFromYopmail } from '../helpers/yopmail';
+import { studentSignupData, uniqueStudentData } from '../data/student-data';
+import { createInbox, fetchOtp } from '../helpers/mailtm';
 import { env } from '../data/environments';
 
 const { form: formData, otp: otpData } = studentSignupData;
 
 /**
- * Full IT Student signup: login → Sign Up → IT Student → form → OTP (from yopmail) → dashboard.
+ * Full IT Student signup: login → Sign Up → IT Student → form → OTP (from a mail.tm inbox) → dashboard.
  *
  * Static fixtures (defaults, placeholders, OTP subject) live in tests/data/student-signup.json.
  * Every run generates a brand-new name/CNIC/email/phone (see uniqueStudentData), so the
@@ -18,8 +18,10 @@ test.describe('IT Student signup (end to end)', () => {
   // Real email round-trip, so give it room.
   test.setTimeout(3 * 60_000);
 
-  test('registers a new IT Student and verifies the emailed OTP', async ({ page, browser }) => {
-    const student = uniqueStudentData();
+  test('registers a new IT Student and verifies the emailed OTP', async ({ page }) => {
+    // A fresh disposable inbox per run; its address is the email the portal sends the OTP to.
+    const inbox = await createInbox();
+    const student = uniqueStudentData(inbox.address);
     test.info().annotations.push({ type: 'student', description: JSON.stringify(student) });
 
     // Login → Sign Up
@@ -59,9 +61,7 @@ test.describe('IT Student signup (end to end)', () => {
     const otpPage = new OtpPage(page);
     await otpPage.expectVisible();
 
-    const otp = await fetchOtpFromYopmail(browser, yopmailInbox(student.email), {
-      subject: new RegExp(otpData.emailSubject, 'i'),
-    });
+    const otp = await fetchOtp(inbox, { subject: new RegExp(otpData.emailSubject, 'i') });
     test.info().annotations.push({ type: 'otp', description: otp });
 
     await otpPage.verify(otp);

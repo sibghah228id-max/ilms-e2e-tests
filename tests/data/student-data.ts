@@ -8,11 +8,11 @@ export const studentSignupData = signupData;
  * Fresh, unique IT Student registration data for every call.
  *
  * The portal rejects duplicate emails and CNICs, so the identity fields are never hard-coded:
- * the timestamp + a random tail seed the name, CNIC, email and phone. Everything else
- * (date of birth, gender, password, university, email domain) comes from student-signup.json.
- * The email lands in a throwaway yopmail inbox so the test can read the OTP back.
+ * the timestamp + a random tail seed the name, CNIC and phone, and the email is the address of
+ * a throwaway inbox created per run (see helpers/mailtm.ts). Everything else (date of birth,
+ * gender, password, university) comes from student-signup.json.
  */
-export function uniqueStudentData(overrides: Partial<StudentData> = {}): StudentData {
+export function uniqueStudentData(email: string, overrides: Partial<StudentData> = {}): StudentData {
   const { student } = studentSignupData;
 
   const stamp = Date.now().toString(); // 13 digits
@@ -31,7 +31,7 @@ export function uniqueStudentData(overrides: Partial<StudentData> = {}): Student
     cnic,
     dateOfBirth: student.dateOfBirth,
     gender: student.gender as StudentData['gender'],
-    email: `student${tag}@${student.emailDomain}`,
+    email,
     phone,
     password: student.password,
     confirmPassword: student.password,
@@ -44,9 +44,4 @@ export function uniqueStudentData(overrides: Partial<StudentData> = {}): Student
 function digitsToLetters(digits: string): string {
   const letters = digits.replace(/\d/g, (d) => String.fromCharCode(97 + Number(d)));
   return letters.charAt(0).toUpperCase() + letters.slice(1);
-}
-
-/** The yopmail inbox name (local part) of a yopmail address. */
-export function yopmailInbox(email: string): string {
-  return email.split('@')[0];
 }

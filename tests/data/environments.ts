@@ -26,9 +26,6 @@ export const env: Environment = environments[currentEnvName()];
 /** Full login URL of the student/company portal, e.g. https://portal-staging.industechconnect.pk/login */
 export const portalLoginUrl = env.portal.baseUrl + env.portal.loginPath;
 
-/** Full login URL of the master (admin) panel, e.g. https://master-staging.industechconnect.pk/securecontroller/login */
-export const masterLoginUrl = env.master.baseUrl + env.master.loginPath;
-
 /** Public INDUS marketing website the portal links out to, e.g. https://beta.industechconnect.pk */
 export const websiteUrl = env.website.baseUrl;
 

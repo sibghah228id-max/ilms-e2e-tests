@@ -4,8 +4,6 @@ import { type Page, type Locator, expect } from '@playwright/test';
 export class OtpPage {
   readonly heading: Locator;
   readonly verifyButton: Locator;
-  readonly resendLink: Locator;
-  readonly backToLoginLink: Locator;
   /**
    * The six visible boxes are display-only <div>s; the page uses `input-otp`, which keeps one
    * real (visually hidden) <input maxlength="6"> stretched over them. Type into that input.
@@ -15,8 +13,6 @@ export class OtpPage {
   constructor(private readonly page: Page) {
     this.heading = page.getByRole('heading', { name: 'OTP verification' });
     this.verifyButton = page.getByRole('button', { name: 'Verify Now' });
-    this.resendLink = page.getByText(/Resend OTP|Resend available in/);
-    this.backToLoginLink = page.getByRole('link', { name: 'Back to Login' });
     this.input = page.locator('input[data-input-otp]');
   }
 

@@ -3,7 +3,6 @@
     "namePrefix": "Test Student",
     "dateOfBirth": "1999-09-12",
     "gender": "Female",
-    "emailDomain": "yopmail.com",
     "password": "1234567890",
     "university": "Air University"
   },
@@ -18,5 +17,8 @@
   },
   "otp": {
     "emailSubject": "INDUS OTP"
+  },
+  "mail": {
+    "apiBaseUrl": "https://api.mail.tm"
   }
 }
