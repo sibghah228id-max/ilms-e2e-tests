@@ -1,0 +1,20 @@
+{
+  "professional": {
+    "namePrefix": "Test Professional",
+    "dateOfBirth": "1995-03-18",
+    "gender": "Male",
+    "password": "Pro@Pass2026",
+    "yearsOfExperience": "5",
+    "workStatus": "Employed"
+  },
+  "form": {
+    "placeholders": {
+      "name": "Enter your full name",
+      "cnic": "Enter 13-digit CNIC (no dashes)",
+      "email": "Enter your email address",
+      "phone": "Enter your phone number",
+      "yearsOfExperience": "e.g. 3"
+    },
+    "phoneCountryLabel": "PK | +92"
+  }
+}
