@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import path from 'path';
 import { RoleSelectionPage, StudentRegistrationPage } from '../pages/create-account.page';
 import { OtpPage } from '../pages/otp.page';
 import { studentSignupData, uniqueStudentData } from '../data/student-data';
@@ -10,8 +11,14 @@ import { AdminUsersPage } from '../pages/admin-users.page';
 import { StudentLoginPage } from '../pages/login.page';
 import { DashboardPage } from '../pages/dashboard.page';
 import { PROFILE_COMPLETION_TARGET, STUDENT_ACTIVATION_STEPS } from '../data/dashboard-onboarding';
+import { ProfilePage, PROFILE_STEP_HEADINGS } from '../pages/profile.page';
+import { DigitalCvPage } from '../pages/digital-cv.page';
+import { studentProfileData } from '../data/student-profile-data';
 
 const { form: formData, otp: otpData } = studentSignupData;
+
+/** Profile picture uploaded on Personal Details (PNG, matching the upload control's accepted types). */
+const profileImagePath = path.resolve(__dirname, '../fixtures/profile-image.png');
 
 /**
  * Full IT Student signup: login → Sign Up → IT Student → form → OTP (from a mail.tm inbox) → dashboard,
@@ -25,8 +32,8 @@ const { form: formData, otp: otpData } = studentSignupData;
  * portal never sees a duplicate account. Each run leaves a real account behind on the portal.
  */
 test.describe('IT Student signup (end to end)', () => {
-  // Two real email round-trips plus the admin panel in a second tab, so give it room.
-  test.setTimeout(6 * 60_000);
+  // Two real email round-trips, the admin panel in a second tab and the profile wizard, so give it room.
+  test.setTimeout(9 * 60_000);
 
   test('registers a new IT Student, gets PakID-verified by the admin, and sees it completed after re-login', async ({ page }) => {
     // A fresh disposable inbox per run; its address is the email the portal sends the OTP to.
@@ -168,5 +175,45 @@ test.describe('IT Student signup (end to end)', () => {
     await dashboard.openCompleteProfile();
     await expect(page).toHaveURL(/\/profile\/?$/);
     await expect(page.getByRole('heading', { name: 'Personal Details' })).toBeVisible({ timeout: 30_000 });
+
+    // Complete only missing profile information, one wizard step at a time.
+    const profilePage = new ProfilePage(page);
+    await profilePage.expectVisible();
+
+    // Preserve profile values already populated during registration and fill only missing required fields.
+    await profilePage.openPersonalDetails();
+    await profilePage.completeMissingPersonalDetails(studentProfileData.personal);
+    // Ensure a profile image is present before completing Personal Details.
+    await profilePage.ensureProfileImage(profileImagePath);
+    await profilePage.saveAndNext(PROFILE_STEP_HEADINGS.education);
+
+    await profilePage.completeMissingEducationDetails(studentProfileData.education);
+    await profilePage.saveAndNext(PROFILE_STEP_HEADINGS.skills);
+
+    // Select valid skill/language options and assign proficiency ratings.
+    await profilePage.completeSkillsAndLanguages(studentProfileData.skills);
+    await profilePage.saveAndNext(PROFILE_STEP_HEADINGS.experience);
+
+    // Add one experience record for the newly registered student.
+    await profilePage.addExperience(studentProfileData.experience);
+    await profilePage.saveAndNext(PROFILE_STEP_HEADINGS.achievements);
+
+    // Add supporting certificate, achievement, and publication records.
+    await profilePage.addCertificate(studentProfileData.certificate);
+    await profilePage.addAchievement(studentProfileData.achievement);
+    await profilePage.addPublication(studentProfileData.publication);
+
+    // The saved-profile dialog reports the new completion figure, which must have gone up.
+    const savedPct = await profilePage.saveProfile();
+    expect(savedPct).toBeGreaterThan(completionPct);
+
+    // Open the generated Digital CV after completing the profile.
+    const digitalCv = new DigitalCvPage(page);
+    await digitalCv.open();
+    await digitalCv.expectCvOptions();
+
+    // The full CV carries the student's name as its title (heading level depends on the template).
+    const cvPage = await digitalCv.openFullCv();
+    await expect(cvPage.getByRole('heading', { name: new RegExp(`^${student.name}$`, 'i') })).toBeVisible();
   });
 });

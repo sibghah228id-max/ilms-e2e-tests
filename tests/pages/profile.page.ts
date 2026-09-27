@@ -1,0 +1,428 @@
+import { type Page, type Locator, expect } from '@playwright/test';
+import type { SkillRating, StudentProfileData } from '../data/student-profile-data';
+
+/** Stepper entries (sidebar buttons, accessible names without the number/status). */
+export const PROFILE_STEPS = {
+  personal: 'Personal Details',
+  education: 'Education',
+  skills: 'Skills & Languages',
+  experience: 'Experience (Optional)',
+  achievements: 'Certifications & Achievements',
+} as const;
+
+/** Main headings shown for each step; "Save & Next" moves to the next one. */
+export const PROFILE_STEP_HEADINGS = {
+  personal: 'Personal Details',
+  education: 'Educations',
+  skills: 'Skills & Language',
+  experience: 'Experience',
+  achievements: 'Certificates',
+} as const;
+
+/**
+ * Student profile wizard: /profile.
+ *
+ * Five steps share one page; a stepper on the side switches between them and "Save & Next" saves
+ * the current step (toast "Data saved successfully!") and opens the next one. Text inputs are
+ * react-aria fields whose labels end in "*", comboboxes only open on real key presses, and the
+ * description fields are rich-text editors (contenteditable). Repeatable records (education,
+ * experience, certificates, achievements, publications) are inline sections added with an
+ * "Add …" button; their inputs carry stable ids such as `experiences.0.title`.
+ */
+export class ProfilePage {
+  readonly main: Locator;
+  readonly saveAndNextButton: Locator;
+  readonly saveButton: Locator;
+  readonly savedToast: Locator;
+
+  constructor(private readonly page: Page) {
+    this.main = page.locator('main');
+    this.saveAndNextButton = page.getByRole('button', { name: 'Save & Next', exact: true });
+    this.saveButton = page.getByRole('button', { name: 'Save', exact: true });
+    this.savedToast = page.getByText('Data saved successfully!');
+  }
+
+  async expectVisible() {
+    await expect(this.page).toHaveURL(/\/profile\/?$/);
+    await expect(this.heading(PROFILE_STEP_HEADINGS.personal)).toBeVisible({ timeout: 30_000 });
+  }
+
+  /** Step heading in the form area. */
+  heading(name: string): Locator {
+    return this.main.getByRole('heading', { level: 1, name, exact: true });
+  }
+
+  /** Stepper button for a step; its text also carries the status ("Pending", "Completed", ...). */
+  stepButton(step: keyof typeof PROFILE_STEPS): Locator {
+    return this.page.getByRole('button', { name: PROFILE_STEPS[step], exact: true });
+  }
+
+  async openStep(step: keyof typeof PROFILE_STEPS) {
+    await this.stepButton(step).click();
+    await expect(this.heading(PROFILE_STEP_HEADINGS[step])).toBeVisible();
+  }
+
+  async openPersonalDetails() {
+    await this.openStep('personal');
+  }
+
+  /** Input with id `id` (ids of repeatable records contain dots, so an attribute selector is used). */
+  private byId(id: string): Locator {
+    return this.page.locator(`[id="${id}"]`);
+  }
+
+  /** Fills a text-like input only when it is still empty; existing values are left untouched. */
+  async fillIfEmpty(locator: Locator, value: string) {
+    if (!(await locator.inputValue()).trim()) {
+      await locator.fill(value);
+    }
+    await expect(locator).not.toHaveValue('');
+  }
+
+  /**
+   * Picks an option in a react-aria combobox. The listbox opens only on real key presses, so the
+   * search text is typed; `optionName` selects a specific option, otherwise the first match wins.
+   * Multi-select comboboxes keep their popover open after a pick, so it is closed explicitly.
+   */
+  async pickComboOption(combo: Locator, search: string, optionName?: string | RegExp, { multi = false } = {}) {
+    // A string name must match exactly ("Communication" is also part of "Microwave Communication").
+    const option = optionName
+      ? this.page.getByRole('option', { name: optionName, exact: typeof optionName === 'string' })
+      : this.page.getByRole('option').first();
+    const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+    // The list re-renders while the search text filters it, so a click can land on an option that
+    // is being replaced and commit nothing (the typed text then looks like a value until the form
+    // validates). Repeat the whole pick until the combobox reports the chosen option as its value.
+    await expect(async () => {
+      await combo.click();
+      if (search) {
+        await combo.fill('');
+        await this.page.keyboard.type(search, { delay: 30 });
+      }
+      if ((await combo.getAttribute('aria-expanded')) !== 'true') await this.page.keyboard.press('ArrowDown');
+      await expect(option).toBeVisible({ timeout: 3_000 });
+
+      const chosen = normalize(await option.innerText());
+      await option.click();
+      if (!multi) {
+        await expect
+          .poll(async () => normalize(await combo.inputValue()), { timeout: 3_000 })
+          .toBe(chosen);
+        // Option lists load lazily; a pick made against a list that is still loading is dropped
+        // when the data arrives. Re-check once the network has settled so such a revert retries.
+        await this.page.waitForLoadState('networkidle');
+        await expect
+          .poll(async () => normalize(await combo.inputValue()), { timeout: 2_000 })
+          .toBe(chosen);
+      }
+    }).toPass({ timeout: 45_000, intervals: [500, 1_000, 2_000] });
+
+    // Single-select comboboxes close on their own after a pick, and Escape while they are still
+    // open would revert the selection. Multi-select ones stay open, so only those get Escape.
+    const listbox = this.page.getByRole('listbox');
+    const stillOpen = await listbox.waitFor({ state: 'hidden', timeout: 2_000 }).then(() => false, () => true);
+    if (stillOpen) await this.page.keyboard.press('Escape');
+    await expect(listbox).toHaveCount(0);
+  }
+
+  /** Single-value combobox: picks an option only when nothing is selected yet. */
+  async pickComboIfEmpty(combo: Locator, search: string, optionName?: string | RegExp) {
+    if (!(await combo.inputValue()).trim()) {
+      await this.pickComboOption(combo, search, optionName);
+    }
+    await expect(combo).not.toHaveValue('');
+  }
+
+  /** Multi-select combobox: adds `optionName` as a tag unless that tag is already present. */
+  async addTag(combo: Locator, optionName: string) {
+    const tag = combo.locator('xpath=ancestor::*[@role="group"][1]').getByText(optionName, { exact: true });
+    if (await tag.count()) return;
+    await this.pickComboOption(combo, optionName, optionName, { multi: true });
+    // Typed search text stays in the input after a multi-select pick; clear it for the next one.
+    if (await combo.inputValue()) await combo.fill('');
+    await expect(tag).toBeVisible();
+  }
+
+  /** Types into a rich-text editor only when it has no content yet. */
+  async fillEditorIfEmpty(editor: Locator, text: string) {
+    if (!(await editor.innerText()).trim()) {
+      await editor.click();
+      await this.page.keyboard.type(text);
+    }
+    await expect(editor).toContainText(text.slice(0, 40));
+  }
+
+  /**
+   * Moves a react-aria range slider to `target` with the keyboard (PageUp/PageDown for big steps,
+   * arrows for single steps), driven by the value the slider actually reports after each key.
+   */
+  async setSlider(slider: Locator, target: number) {
+    expect(target, 'slider rating must be within 1–100').toBeGreaterThanOrEqual(1);
+    expect(target).toBeLessThanOrEqual(100);
+
+    await slider.focus();
+    let current = Number(await slider.inputValue());
+    for (let guard = 0; current !== target && guard < 200; guard++) {
+      const diff = target - current;
+      const key = Math.abs(diff) >= 10 ? (diff > 0 ? 'PageUp' : 'PageDown') : diff > 0 ? 'ArrowRight' : 'ArrowLeft';
+      await slider.press(key);
+      const next = Number(await slider.inputValue());
+      if (next === current) throw new Error(`Slider did not move on ${key} (stuck at ${current}, target ${target})`);
+      current = next;
+    }
+    await expect(slider).toHaveValue(String(target));
+  }
+
+  /**
+   * "Save & Next" for the current step: waits for the success toast and for the next step's
+   * heading, so the following assertions run against the new step.
+   */
+  async saveAndNext(nextHeading: string) {
+    await this.saveAndNextButton.click();
+    await expect(this.savedToast).toBeVisible({ timeout: 30_000 });
+
+    // A step that fails validation stays put and shows "… is required" messages; report those
+    // rather than a bare missing-heading timeout.
+    const next = this.heading(nextHeading);
+    const validationMessage = this.main.getByText(/is required/i);
+    await expect(next.or(validationMessage).first()).toBeVisible({ timeout: 30_000 });
+    if (!(await next.isVisible())) {
+      throw new Error(`"Save & Next" was rejected: ${(await validationMessage.allInnerTexts()).join('; ')}`);
+    }
+    await expect(next).toBeVisible();
+    // The saved profile is fetched again right after the switch; let that settle before editing.
+    await this.page.waitForLoadState('networkidle');
+  }
+
+  /**
+   * Clicks an "Add …" button and waits for its inline section heading. A section added while the
+   * step is still reloading after a save is discarded by the re-render, so the section is checked
+   * again once the network is quiet and the click is repeated if it vanished.
+   */
+  private async addRecordSection(buttonName: string, sectionHeading: string) {
+    const section = this.main.getByRole('heading', { name: sectionHeading, exact: true });
+    await expect(async () => {
+      if (!(await section.isVisible())) {
+        await this.page.getByRole('button', { name: buttonName, exact: true }).click();
+        await expect(section).toBeVisible({ timeout: 5_000 });
+      }
+      await this.page.waitForLoadState('networkidle');
+      await expect(section).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] });
+  }
+
+  /**
+   * Final "Save" on the last step. Besides the toast, the portal opens a "Profile saved
+   * successfully" dialog that reports the new completion percentage; it is acknowledged here so
+   * the page can be used afterwards. Returns that percentage.
+   */
+  async saveProfile(): Promise<number> {
+    await this.saveButton.click();
+    await expect(this.savedToast).toBeVisible({ timeout: 30_000 });
+
+    const dialog = this.page.getByRole('dialog', { name: 'Profile saved successfully' });
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    const match = (await dialog.innerText()).match(/Your profile is (\d+)% complete/);
+    expect(match, 'completion percentage in the saved-profile dialog').not.toBeNull();
+
+    await dialog.getByRole('button', { name: 'Continue editing' }).click();
+    await expect(dialog).toBeHidden();
+    return Number(match![1]);
+  }
+
+  // ---- Step 1: Personal Details -------------------------------------------------------------
+
+  /**
+   * Registration already filled name, email, phone, date of birth and gender; those are checked
+   * and kept. City, address and description are the required fields still empty for a new account.
+   */
+  async completeMissingPersonalDetails(data: StudentProfileData['personal']) {
+    await expect(this.byId('fullName')).not.toHaveValue('');
+    await expect(this.byId('email')).not.toHaveValue('');
+    await expect(this.byId('phone_e164')).not.toHaveValue('');
+    await expect(this.byId('dob')).not.toHaveValue('');
+    await expect(this.page.getByRole('radiogroup', { name: 'Gender' }).getByRole('radio', { checked: true })).toHaveCount(1);
+
+    await this.pickComboIfEmpty(this.page.getByRole('combobox', { name: /^City/ }), data.citySearch, new RegExp(`^${data.citySearch}`));
+    await this.fillIfEmpty(this.byId('address'), data.address);
+    await this.fillEditorIfEmpty(this.main.locator('[contenteditable="true"]').first(), data.description);
+  }
+
+  // ---- Step 1: profile image ----------------------------------------------------------------
+
+  /** Hidden file input behind the "Upload avatar" control next to the avatar (PNG/JPEG). */
+  private get avatarInput(): Locator {
+    return this.page.locator('#avatar-upload');
+  }
+
+  /** Uploaded avatar shown in the Personal Details header; absent while the placeholder icon shows. */
+  private get avatarImage(): Locator {
+    return this.main.getByRole('img', { name: 'Profile Picture' });
+  }
+
+  async hasProfileImage(): Promise<boolean> {
+    return (await this.avatarImage.count()) > 0;
+  }
+
+  /**
+   * Uploads an image through the hidden file input. The portal opens a "Crop profile picture"
+   * dialog first; confirming it posts the avatar straight away (independent of "Save & Next").
+   */
+  async uploadProfileImage(filePath: string) {
+    await this.avatarInput.setInputFiles(filePath);
+
+    const cropDialog = this.page.getByRole('dialog', { name: 'Crop profile picture' });
+    await expect(cropDialog).toBeVisible();
+    const uploaded = this.page.waitForResponse(
+      (r) => r.url().includes('/api/profile/avatar') && r.request().method() === 'POST',
+    );
+    await cropDialog.getByRole('button', { name: 'Crop & upload' }).click();
+
+    const response = await uploaded;
+    expect(response.ok(), `avatar upload responded ${response.status()}`).toBeTruthy();
+    await expect(cropDialog).toBeHidden();
+    await expect(this.page.getByText('Avatar updated successfully!')).toBeVisible();
+  }
+
+  /** The avatar is rendered from the stored upload rather than the placeholder icon. */
+  async expectProfileImageVisible() {
+    await expect(this.avatarImage).toBeVisible();
+    await expect(this.avatarImage).toHaveAttribute('src', /\/storage\/uploads\//);
+  }
+
+  /** Uploads a profile image only when none is present yet. */
+  async ensureProfileImage(filePath: string) {
+    if (await this.hasProfileImage()) {
+      await this.expectProfileImageVisible();
+      return;
+    }
+    await this.uploadProfileImage(filePath);
+    await this.expectProfileImageVisible();
+  }
+
+  // ---- Step 2: Education --------------------------------------------------------------------
+
+  /**
+   * Registration created one education record; the university chosen at signup may already be
+   * in it. Whatever is present is kept, the rest of that same record is completed, and no second
+   * record is added.
+   */
+  async completeMissingEducationDetails(data: StudentProfileData['education']) {
+    // The step fetches its option lists after it opens, and picking Campus, Department or Program
+    // reloads the dependent lists. A selection made before such a reload keeps its text but loses
+    // its key, so Degree Type is picked last, once the network is quiet, and everything is
+    // re-checked right before the caller saves.
+    await this.page.waitForLoadState('networkidle');
+    await this.pickComboIfEmpty(this.byId('educations.0.institutionId'), data.institutionSearch, data.institution);
+    await this.pickComboIfEmpty(this.byId('educations.0.campusId'), '', new RegExp(`^${escapeRegExp(data.campus)}`));
+    await this.pickComboIfEmpty(this.byId('educations.0.departmentId'), '', data.department);
+    await this.pickComboIfEmpty(this.byId('educations.0.department'), '', data.program);
+    await this.fillIfEmpty(this.byId('educations.0.studentId'), data.studentId);
+    await this.pickComboIfEmpty(this.byId('educations.0.semester'), '', data.semester);
+    await this.fillIfEmpty(this.byId('educations.0.startYear'), data.startYear);
+
+    await this.page.waitForLoadState('networkidle');
+    await this.pickComboIfEmpty(this.byId('educations.0.degreeType'), data.degreeType.slice(0, 4), new RegExp(`^${data.degreeType}`));
+
+    for (const id of [
+      'educations.0.degreeType',
+      'educations.0.institutionId',
+      'educations.0.campusId',
+      'educations.0.departmentId',
+      'educations.0.department',
+      'educations.0.studentId',
+      'educations.0.semester',
+      'educations.0.startYear',
+    ]) {
+      await expect(this.byId(id), `${id} should still hold its value before saving`).not.toHaveValue('');
+    }
+  }
+
+  // ---- Step 3: Skills & Languages -----------------------------------------------------------
+
+  /** Adds one option per category, then rates each selected item on its 0–100 slider. */
+  async completeSkillsAndLanguages(data: StudentProfileData['skills']) {
+    const categories: Array<[RegExp, SkillRating]> = [
+      [/^Core Skills/, data.core],
+      [/^Secondary Skills/, data.secondary],
+      [/^Technical Skills/, data.technical],
+      [/^Languages/, data.language],
+    ];
+    for (const [label, skill] of categories) {
+      await this.addTag(this.page.getByRole('combobox', { name: label }), skill.name);
+    }
+
+    await expect(this.main.getByRole('heading', { name: 'Rate the selected skills out of 100' })).toBeVisible();
+    for (const [, skill] of categories) {
+      await this.setSlider(this.ratingSlider(skill.name), skill.rating);
+    }
+  }
+
+  /**
+   * Rating slider for a selected skill. The slider has no accessible name of its own: each rating
+   * row shows the skill name followed by a group holding the range input, so the slider is found
+   * through the element that follows the name. (The same name also appears as a tag chip in the
+   * combobox, but that chip has no slider next to it.)
+   */
+  ratingSlider(skillName: string): Locator {
+    return this.main.getByText(skillName, { exact: true }).locator('xpath=following-sibling::*[1]').getByRole('slider');
+  }
+
+  // ---- Step 4: Experience -------------------------------------------------------------------
+
+  /** Adds a single experience record; nothing exists here for a freshly registered student. */
+  async addExperience(data: StudentProfileData['experience']) {
+    await expect(this.main.getByRole('heading', { name: /^Experience \d+$/ })).toHaveCount(0);
+    await this.addRecordSection('Add Experience', 'Experience 1');
+
+    await this.page.getByRole('radio', { name: data.jobType, exact: true }).check();
+    await this.byId('experiences.0.title').fill(data.jobTitle);
+    await this.byId('experiences.0.company').fill(data.company);
+    await this.byId('experiences.0.startDate').fill(data.startDate);
+    await this.byId('experiences.0.endDate').fill(data.endDate);
+    await this.addTag(this.page.getByRole('combobox', { name: /^Skills Gained/ }), data.skillGained);
+    await this.fillEditorIfEmpty(this.main.locator('[contenteditable="true"]').last(), data.description);
+  }
+
+  // ---- Step 5: Certificates, Achievements, Publications -------------------------------------
+
+  async addCertificate(data: StudentProfileData['certificate']) {
+    await this.addRecordSection('Add Certificate', 'Certificate 1');
+
+    await this.byId('certifications.0.name').fill(data.name);
+    await this.byId('certifications.0.organization').fill(data.issuingOrganization);
+    await this.byId('certifications.0.issuedDate').fill(data.issuedDate);
+    await this.byId('certifications.0.credential').fill(data.credential);
+  }
+
+  async addAchievement(data: StudentProfileData['achievement']) {
+    await this.addRecordSection('Add Achievement', 'Achievement 1');
+
+    await this.byId('achievements.0.awardType').fill(data.award);
+    await this.byId('achievements.0.organization').fill(data.issuingOrganization);
+    await this.byId('achievements.0.awardedDate').fill(data.awardedDate);
+  }
+
+  async addPublication(data: StudentProfileData['publication']) {
+    await this.addRecordSection('Add Publication', 'Publication 1');
+
+    await this.byId('publications.0.title').fill(data.title);
+
+    // Category offers a list when it is a combobox; otherwise it is a plain text field.
+    const category = this.byId('publications.0.category');
+    if ((await category.getAttribute('role')) === 'combobox') {
+      await this.pickComboOption(category, data.category.slice(0, 3));
+    } else {
+      await category.fill(data.category);
+    }
+    await expect(category).not.toHaveValue('');
+
+    await this.byId('publications.0.publishDate').fill(data.publishDate);
+    await this.byId('publications.0.linkOrDoi').fill(data.link);
+  }
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

@@ -140,3 +140,83 @@ export class StudentRegistrationPage {
     await this.selectUniversity(data.university.split(' ')[0], data.university);
   }
 }
+
+export type InternationalCompanyData = {
+  companyName: string;
+  /** Option in the "Verticals" combobox. */
+  vertical: string;
+  email: string;
+  phone: string;
+  password: string;
+  confirmPassword: string;
+  /** Text typed into the "Country" combobox and the option it must resolve to. */
+  countrySearch: string;
+  countryOption: string | RegExp;
+};
+
+/** International Company registration form: /create-account/international */
+export class InternationalCompanyRegistrationPage {
+  readonly companyName: Locator;
+  readonly vertical: Locator;
+  readonly email: Locator;
+  /** Phone country-code selector (defaults to "PK | +92"). */
+  readonly phoneCountry: Locator;
+  readonly phone: Locator;
+  readonly password: Locator;
+  readonly confirmPassword: Locator;
+  readonly country: Locator;
+  readonly submitButton: Locator;
+
+  constructor(private readonly page: Page) {
+    this.companyName = page.locator('#companyName');
+    this.vertical = page.getByRole('combobox', { name: /^Verticals/ });
+    this.email = page.locator('#companyEmail');
+    this.phoneCountry = page.getByRole('button', { name: /^PK \| \+92/ });
+    this.phone = page.locator('#companyPhone');
+    this.password = page.locator('#password');
+    this.confirmPassword = page.locator('#confirmPassword');
+    this.country = page.getByRole('combobox', { name: /^Country/ });
+    this.submitButton = page.getByRole('button', { name: 'Create Account', exact: true });
+  }
+
+  async goto() {
+    await this.page.goto('/create-account/international', { waitUntil: 'networkidle' });
+  }
+
+  async expectVisible() {
+    await expect(this.page).toHaveURL(/\/create-account\/international\/?$/);
+    await expect(this.companyName).toBeVisible();
+  }
+
+  /** The "Show password" eye button inside the same field wrapper as `input`. */
+  eyeButton(input: Locator): Locator {
+    return input.locator('xpath=..').getByRole('button', { name: /show password|hide password/i });
+  }
+
+  /**
+   * Picks an option in a react-aria combobox (Verticals, Country). The listbox only opens on real
+   * key presses and its items load from the server, so typing is retried until the option shows.
+   */
+  private async selectOption(combo: Locator, search: string, option: string | RegExp) {
+    const item = this.page.getByRole('option', { name: option, exact: typeof option === 'string' });
+    await combo.click();
+    await expect(async () => {
+      await combo.fill('');
+      if (search) await this.page.keyboard.type(search, { delay: 30 });
+      if ((await combo.getAttribute('aria-expanded')) !== 'true') await this.page.keyboard.press('ArrowDown');
+      await expect(item).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] });
+    await item.click();
+    await expect(combo).not.toHaveValue('');
+  }
+
+  async fill(data: InternationalCompanyData) {
+    await this.companyName.fill(data.companyName);
+    await this.selectOption(this.vertical, data.vertical, data.vertical);
+    await this.email.fill(data.email);
+    await this.phone.fill(data.phone);
+    await this.password.fill(data.password);
+    await this.confirmPassword.fill(data.confirmPassword);
+    await this.selectOption(this.country, data.countrySearch, data.countryOption);
+  }
+}
