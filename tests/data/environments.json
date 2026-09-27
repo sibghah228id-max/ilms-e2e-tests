@@ -4,9 +4,12 @@
       "baseUrl": "https://portal-staging.industechconnect.pk",
       "loginPath": "/login"
     },
-    "master": {
+    "admin": {
       "baseUrl": "https://master-staging.industechconnect.pk",
-      "loginPath": "/securecontroller/login"
+      "loginPath": "/securecontroller/login",
+      "email": "masteradmin@app.ilms.pk",
+      "password": "radmin123!@#",
+      "fixedOtp": "787692"
     },
     "website": {
       "baseUrl": "https://staging.industechconnect.pk"
@@ -17,9 +20,12 @@
       "baseUrl": "https://portal.industechconnect.pk",
       "loginPath": "/login"
     },
-    "master": {
+    "admin": {
       "baseUrl": "https://master.industechconnect.pk",
-      "loginPath": "/securecontroller/login"
+      "loginPath": "/securecontroller/login",
+      "email": "masteradmin@app.ilms.pk",
+      "password": "radmin123!@#",
+      "fixedOtp": null
     },
     "website": {
       "baseUrl": "https://industechconnect.pk"

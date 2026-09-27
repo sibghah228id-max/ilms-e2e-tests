@@ -26,6 +26,8 @@ export type OtpOptions = {
   timeoutMs?: number;
   /** Delay between polls. */
   pollMs?: number;
+  /** Codes to skip, e.g. an earlier OTP still sitting in the same inbox. */
+  ignoreCodes?: string[];
 };
 
 type Domain = { domain: string; isActive: boolean };
@@ -78,7 +80,7 @@ export async function createInbox(localPart?: string): Promise<Inbox> {
  * Prefers the plain-text body; falls back to the HTML body with tags stripped.
  */
 export async function fetchOtp(inbox: Inbox, opts: OtpOptions = {}): Promise<string> {
-  const { subject = /OTP/i, pattern = /\b(\d{6})\b/, timeoutMs = 90_000, pollMs = 3_000 } = opts;
+  const { subject = /OTP/i, pattern = /\b(\d{6})\b/, timeoutMs = 90_000, pollMs = 3_000, ignoreCodes = [] } = opts;
   const subjectMatches = (s: string) => (typeof subject === 'string' ? s.includes(subject) : subject.test(s));
 
   const deadline = Date.now() + timeoutMs;
@@ -89,17 +91,16 @@ export async function fetchOtp(inbox: Inbox, opts: OtpOptions = {}): Promise<str
     const messages = members(list);
     seen = messages.length;
 
-    const summary = messages.find((m) => subjectMatches(m.subject));
-    if (summary) {
+    // Several OTP mails can share the inbox (signup, then login), so look at every matching mail
+    // and skip the codes the caller has already used.
+    for (const summary of messages.filter((m) => subjectMatches(m.subject))) {
       const mail = await api<Message>(`/messages/${summary.id}`, {}, inbox.token);
       const html = (mail.html ?? []).join('\n').replace(/<[^>]+>/g, ' ');
       const candidates = [mail.text ?? '', html, mail.subject];
 
-      for (const body of candidates) {
-        const match = body.match(pattern);
-        if (match) return match[1];
-      }
-      throw new Error(`Mail "${mail.subject}" arrived in ${inbox.address} but nothing in it matched ${pattern}`);
+      const code = candidates.map((body) => body.match(pattern)?.[1]).find(Boolean);
+      if (!code) throw new Error(`Mail "${mail.subject}" arrived in ${inbox.address} but nothing in it matched ${pattern}`);
+      if (!ignoreCodes.includes(code)) return code;
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollMs));

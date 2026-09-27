@@ -31,3 +31,6 @@ export const websiteUrl = env.website.baseUrl;
 
 /** Host of the marketing website without scheme, e.g. beta.industechconnect.pk */
 export const websiteHost = new URL(websiteUrl).host;
+
+/** Full login URL of the master admin panel, e.g. https://master-staging.industechconnect.pk/securecontroller/login */
+export const adminLoginUrl = env.admin.baseUrl + env.admin.loginPath;

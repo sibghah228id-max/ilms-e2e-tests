@@ -1,5 +1,10 @@
 import { type Page, type Locator, expect } from '@playwright/test';
-import { ACTIVATION_CHECKLIST, WELCOME_PREVIEW } from '../data/dashboard-onboarding';
+import {
+  ACTIVATION_CHECKLIST,
+  STUDENT_ACTIVATION_STEPS,
+  WELCOME_PREVIEW,
+  type ActivationStep,
+} from '../data/dashboard-onboarding';
 
 /** Backend endpoint the portal reads and updates the walkthrough (preview/tour) state through. */
 export const WALKTHROUGH_API = '/api/onboarding/walkthrough';
@@ -154,3 +159,105 @@ export class ActivationChecklist {
     return Number(match![1]);
   }
 }
+
+/**
+ * Student dashboard (/dashboard) as a whole: the onboarding overlays, the activation checklist
+ * and the sidebar. Composes the page objects above rather than repeating their selectors.
+ */
+export class DashboardPage {
+  readonly preview: WelcomePreviewDialog;
+  readonly tour: FeatureTourDialog;
+  readonly checklist: ActivationChecklist;
+  /** Sidebar "Log Out" entry (an anchor, hidden behind the onboarding overlays while they show). */
+  readonly logoutLink: Locator;
+
+  constructor(private readonly page: Page) {
+    this.preview = new WelcomePreviewDialog(page);
+    this.tour = new FeatureTourDialog(page);
+    this.checklist = new ActivationChecklist(page);
+    this.logoutLink = page.getByRole('link', { name: 'Log Out', exact: true });
+  }
+
+  async expectVisible(timeout = 30_000) {
+    await expect(this.page).toHaveURL(/\/dashboard/, { timeout });
+  }
+
+  /**
+   * Gets the welcome preview and the feature tour out of the way so the page underneath can be
+   * used. Skipping the preview is persisted, so it does not come back on the next login; the tour
+   * follows the preview after a short delay, so give it `tourTimeout` to show up.
+   */
+  async dismissOnboarding(tourTimeout = 10_000) {
+    if (await this.preview.dialog.isVisible()) {
+      await this.preview.skipButton.click();
+      await expect(this.preview.dialog).toBeHidden();
+    }
+    await this.tour.skipIfShown(tourTimeout);
+  }
+
+  /** Sidebar "Log Out"; the portal returns to the login page. */
+  async logout() {
+    await this.logoutLink.click();
+    await expect(this.page).toHaveURL(/\/login/, { timeout: 15_000 });
+  }
+
+  async expectActivationSection() {
+    await this.checklist.expectVisible();
+    await expect(this.checklist.heading).toHaveText(ACTIVATION_CHECKLIST.heading);
+    await expect(this.checklist.description).toHaveText(ACTIVATION_CHECKLIST.description);
+    await expect(this.checklist.items).toHaveCount(STUDENT_ACTIVATION_STEPS.length);
+  }
+
+  /** "N of M completed" counter. */
+  async expectProgress(done: number, total: number) {
+    await expect(this.checklist.progress).toHaveText(`${done} of ${total} completed`);
+  }
+
+  /** A step's row: title, description (with `pct` filled in) and, unless completed, its action. */
+  private async expectStep(step: ActivationStep, pct?: number) {
+    await expect(this.checklist.item(step.title)).toBeVisible();
+    await expect(this.checklist.itemDescription(step.title)).toHaveText(step.description.replace('{pct}', String(pct)));
+    if ((await this.checklist.state(step.title)) !== 'completed') {
+      await expect(this.checklist.action(step.title, step.action)).toBeVisible();
+    }
+  }
+
+  async expectPakIdStep() {
+    await this.expectStep(pakIdStep);
+  }
+
+  /** Reads the live completion percentage, checks the copy around it and returns it. */
+  async expectProfileCompletionStep(): Promise<number> {
+    const pct = await this.checklist.profileCompletionPct(profileStep.title);
+    expect(pct).toBeGreaterThanOrEqual(0);
+    expect(pct).toBeLessThanOrEqual(100);
+    await this.expectStep(profileStep, pct);
+    return pct;
+  }
+
+  async expectPsebStep() {
+    await this.expectStep(psebStep);
+  }
+
+  async expectTalentHubStep() {
+    await this.expectStep(talentHubStep);
+  }
+
+  /**
+   * PakID row shows "Completed" instead of its "Verify with PakID" action. The portal renders one
+   * or the other, so the action must be gone once the verification has been recorded.
+   */
+  async expectPakIdCompleted() {
+    const row = this.checklist.item(pakIdStep.title);
+    await expect(row.getByText(ACTIVATION_CHECKLIST.completedLabel, { exact: true })).toBeVisible();
+    await expect(this.checklist.action(pakIdStep.title, pakIdStep.action)).toHaveCount(0);
+    expect(await this.checklist.state(pakIdStep.title)).toBe('completed');
+  }
+
+  /** "Complete Profile" inside the "Complete your profile" row; it is a link once PakID is verified. */
+  async openCompleteProfile() {
+    await this.checklist.item(profileStep.title).getByRole('link', { name: profileStep.action, exact: true }).click();
+  }
+}
+
+const [pakIdStep, profileStep, psebStep, talentHubStep] = STUDENT_ACTIVATION_STEPS;
