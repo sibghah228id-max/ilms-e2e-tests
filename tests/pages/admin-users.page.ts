@@ -11,8 +11,9 @@ export class AdminUsersPage {
   readonly userbaseToggle: Locator;
   readonly indusUsersLink: Locator;
   readonly heading: Locator;
-  /** Stakeholder tabs above the table ("IT Students", "IT Companies", ...). */
+  /** Stakeholder tabs above the table ("IT Students", "IT Professionals", "IT Companies", ...). */
   readonly itStudentsTab: Locator;
+  readonly itProfessionalsTab: Locator;
   readonly table: Locator;
   /** Search box above the table; matches name, email, phone, CNIC or "#id". */
   readonly searchBox: Locator;
@@ -26,6 +27,7 @@ export class AdminUsersPage {
     this.indusUsersLink = page.getByRole('link', { name: 'INDUS Users' });
     this.heading = page.getByRole('heading', { name: 'INDUS Users' });
     this.itStudentsTab = page.getByRole('link', { name: 'IT Students' });
+    this.itProfessionalsTab = page.getByRole('link', { name: 'IT Professionals' });
     this.table = page.getByRole('table');
     this.searchBox = page.getByPlaceholder(/^Name, email, phone, CNIC/);
     this.cnicModal = page.locator('[role="dialog"][aria-labelledby="cnic-modal-title"]');
@@ -55,6 +57,14 @@ export class AdminUsersPage {
     await expect(this.page).toHaveURL(/\/securecontroller\/users\?.*stakeholder_type_id=1/);
     await expect(this.table).toBeVisible();
     // The row menus are wired up by a script at the end of the page, so wait for it to load.
+    await this.page.waitForLoadState('load');
+  }
+
+  /** Switches the list to IT Professionals (stakeholder_type_id=2) and waits for the table. */
+  async selectItProfessional() {
+    await this.itProfessionalsTab.click();
+    await expect(this.page).toHaveURL(/\/securecontroller\/users\?.*stakeholder_type_id=2/);
+    await expect(this.table).toBeVisible();
     await this.page.waitForLoadState('load');
   }
 

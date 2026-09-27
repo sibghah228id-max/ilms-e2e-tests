@@ -19,6 +19,17 @@ export const PROFILE_STEP_HEADINGS = {
   achievements: 'Certificates',
 } as const;
 
+/** Main headings for the IT Professional wizard (Work Experience comes before Skills). */
+export const PROFESSIONAL_PROFILE_STEP_HEADINGS = {
+  personal: 'Personal Details',
+  education: 'Educations',
+  /** Work Experience step; the form heading matches the student Experience step. */
+  experience: 'Experience',
+  skills: 'Skills & Language',
+  certifications: 'Certificates',
+  projects: 'Projects',
+} as const;
+
 /**
  * Student profile wizard: /profile.
  *
@@ -39,7 +50,8 @@ export class ProfilePage {
     this.main = page.locator('main');
     this.saveAndNextButton = page.getByRole('button', { name: 'Save & Next', exact: true });
     this.saveButton = page.getByRole('button', { name: 'Save', exact: true });
-    this.savedToast = page.getByText('Data saved successfully!');
+    // Several saves in one run can leave stacked Toastify alerts with the same copy; assert the newest.
+    this.savedToast = page.getByRole('alert').filter({ hasText: 'Data saved successfully!' }).last();
   }
 
   async expectVisible() {
@@ -201,7 +213,9 @@ export class ProfilePage {
    * again once the network is quiet and the click is repeated if it vanished.
    */
   private async addRecordSection(buttonName: string, sectionHeading: string) {
-    const section = this.main.getByRole('heading', { name: sectionHeading, exact: true });
+    // Prefer the first matching heading: some roles reuse the same title for every record
+    // (e.g. IT Professional education sections are all "Education Details").
+    const section = this.main.getByRole('heading', { name: sectionHeading, exact: true }).first();
     await expect(async () => {
       if (!(await section.isVisible())) {
         await this.page.getByRole('button', { name: buttonName, exact: true }).click();
@@ -309,37 +323,61 @@ export class ProfilePage {
   // ---- Step 2: Education --------------------------------------------------------------------
 
   /**
-   * Registration created one education record; the university chosen at signup may already be
-   * in it. Whatever is present is kept, the rest of that same record is completed, and no second
-   * record is added.
+   * Completes the first education record. IT Students already have one from registration (the
+   * university chosen at signup may already be in it); IT Professionals start with none, so an
+   * "Add Education" record is created first (section heading "Education Details"). Whatever is
+   * present is kept, the rest of that same record is completed, and no second record is added.
    */
-  async completeMissingEducationDetails(data: StudentProfileData['education']) {
+  async completeMissingEducationDetails(
+    data: Omit<StudentProfileData['education'], 'semester'> & { semester?: string; endYear?: string },
+  ) {
     // The step fetches its option lists after it opens, and picking Campus, Department or Program
     // reloads the dependent lists. A selection made before such a reload keeps its text but loses
     // its key, so Degree Type is picked last, once the network is quiet, and everything is
     // re-checked right before the caller saves.
     await this.page.waitForLoadState('networkidle');
+
+    // Students get educations.0 from signup; IT Professionals show an empty step until added.
+    // The added section is headed "Education Details" (not "Education 1").
+    if ((await this.byId('educations.0.institutionId').count()) === 0) {
+      await this.addRecordSection('Add Education', 'Education Details');
+    }
+
     await this.pickComboIfEmpty(this.byId('educations.0.institutionId'), data.institutionSearch, data.institution);
     await this.pickComboIfEmpty(this.byId('educations.0.campusId'), '', new RegExp(`^${escapeRegExp(data.campus)}`));
     await this.pickComboIfEmpty(this.byId('educations.0.departmentId'), '', data.department);
     await this.pickComboIfEmpty(this.byId('educations.0.department'), '', data.program);
     await this.fillIfEmpty(this.byId('educations.0.studentId'), data.studentId);
-    await this.pickComboIfEmpty(this.byId('educations.0.semester'), '', data.semester);
+
+    // Semester is student-only; professionals use Subjects / End Year instead.
+    const semester = this.byId('educations.0.semester');
+    if ((await semester.count()) > 0 && data.semester) {
+      await this.pickComboIfEmpty(semester, '', data.semester);
+    }
+
     await this.fillIfEmpty(this.byId('educations.0.startYear'), data.startYear);
+
+    const endYear = this.byId('educations.0.endYear');
+    if ((await endYear.count()) > 0 && data.endYear) {
+      await this.fillIfEmpty(endYear, data.endYear);
+    }
 
     await this.page.waitForLoadState('networkidle');
     await this.pickComboIfEmpty(this.byId('educations.0.degreeType'), data.degreeType.slice(0, 4), new RegExp(`^${data.degreeType}`));
 
-    for (const id of [
+    const requiredIds = [
       'educations.0.degreeType',
       'educations.0.institutionId',
       'educations.0.campusId',
       'educations.0.departmentId',
       'educations.0.department',
       'educations.0.studentId',
-      'educations.0.semester',
       'educations.0.startYear',
-    ]) {
+    ];
+    if ((await semester.count()) > 0 && data.semester) requiredIds.push('educations.0.semester');
+    if ((await endYear.count()) > 0 && data.endYear) requiredIds.push('educations.0.endYear');
+
+    for (const id of requiredIds) {
       await expect(this.byId(id), `${id} should still hold its value before saving`).not.toHaveValue('');
     }
   }
@@ -374,14 +412,42 @@ export class ProfilePage {
     return this.main.getByText(skillName, { exact: true }).locator('xpath=following-sibling::*[1]').getByRole('slider');
   }
 
+  /**
+   * Dismisses sticky/sidebar "Profile Completion" strips that sit over the top of the form and
+   * intercept clicks (common once completion climbs during the wizard).
+   */
+  async dismissProfileCompletionOverlays() {
+    const candidates = [
+      this.page.locator('div.sticky').getByRole('button', { name: 'Dismiss', exact: true }),
+      this.page.locator('div.sticky').getByRole('button', { name: 'Close', exact: true }),
+      this.page.getByRole('button', { name: 'Dismiss', exact: true }),
+    ];
+    for (const btn of candidates) {
+      if (await btn.first().isVisible().catch(() => false)) {
+        await btn.first().click();
+        await expect(btn.first()).toBeHidden({ timeout: 5_000 }).catch(() => undefined);
+        break;
+      }
+    }
+  }
+
   // ---- Step 4: Experience -------------------------------------------------------------------
 
   /** Adds a single experience record; nothing exists here for a freshly registered student. */
   async addExperience(data: StudentProfileData['experience']) {
+    await this.dismissProfileCompletionOverlays();
     await expect(this.main.getByRole('heading', { name: /^Experience \d+$/ })).toHaveCount(0);
     await this.addRecordSection('Add Experience', 'Experience 1');
 
-    await this.page.getByRole('radio', { name: data.jobType, exact: true }).check();
+    // React-aria radios: the <input> is covered by its <label>, so click the visible label text
+    // (same pattern as Gender on the registration form). Skip if already selected.
+    const jobTypeGroup = this.page.getByRole('radiogroup', { name: 'Job Type' });
+    const jobTypeRadio = jobTypeGroup.getByRole('radio', { name: data.jobType, exact: true });
+    if (!(await jobTypeRadio.isChecked())) {
+      await jobTypeGroup.getByText(data.jobType, { exact: true }).click();
+    }
+    await expect(jobTypeRadio).toBeChecked();
+
     await this.byId('experiences.0.title').fill(data.jobTitle);
     await this.byId('experiences.0.company').fill(data.company);
     await this.byId('experiences.0.startDate').fill(data.startDate);

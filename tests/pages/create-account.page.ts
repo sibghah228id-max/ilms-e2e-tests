@@ -141,6 +141,80 @@ export class StudentRegistrationPage {
   }
 }
 
+export type ItProfessionalData = {
+  name: string;
+  cnic: string;
+  dateOfBirth: string; // YYYY-MM-DD
+  gender: 'Male' | 'Female' | 'Other';
+  email: string;
+  phone: string;
+  password: string;
+  confirmPassword: string;
+  yearsOfExperience: string;
+  workStatus: 'Employed' | 'Freelancer' | 'Unemployed';
+};
+
+/** IT Professional registration form: /create-account/it-professional */
+export class ItProfessionalRegistrationPage {
+  readonly name: Locator;
+  readonly cnic: Locator;
+  readonly dateOfBirth: Locator;
+  readonly genderGroup: Locator;
+  readonly email: Locator;
+  /** Phone country-code selector (defaults to "PK | +92"). */
+  readonly phoneCountry: Locator;
+  readonly phone: Locator;
+  readonly password: Locator;
+  readonly confirmPassword: Locator;
+  readonly yearsOfExperience: Locator;
+  readonly workStatusGroup: Locator;
+  readonly submitButton: Locator;
+
+  constructor(private readonly page: Page) {
+    this.name = page.locator('#name');
+    this.cnic = page.locator('#cnic');
+    this.dateOfBirth = page.locator('#dateOfBirth');
+    this.genderGroup = page.getByRole('radiogroup', { name: 'Gender' });
+    this.email = page.locator('#email');
+    // Prefer the visible country button over getByText('PK | +92'), which also matches a <option>.
+    this.phoneCountry = page.getByRole('button', { name: /^PK \| \+92/ });
+    // Professional form uses #phoneNumber (student form uses #phone_e164).
+    this.phone = page.locator('#phoneNumber');
+    this.password = page.locator('#password');
+    this.confirmPassword = page.locator('#confirmPassword');
+    this.yearsOfExperience = page.locator('#yearsExperience');
+    this.workStatusGroup = page.getByRole('radiogroup', { name: 'Current Work Status' });
+    this.submitButton = page.getByRole('button', { name: 'Create Account', exact: true });
+  }
+
+  async goto() {
+    await this.page.goto('/create-account/it-professional', { waitUntil: 'networkidle' });
+  }
+
+  async expectVisible() {
+    await expect(this.page).toHaveURL(/\/create-account\/it-professional\/?$/);
+    await expect(this.name).toBeVisible();
+  }
+
+  /** The "Show password" eye button inside the same field wrapper as `input`. */
+  eyeButton(input: Locator): Locator {
+    return input.locator('xpath=..').getByRole('button', { name: /show password|hide password/i });
+  }
+
+  async fill(data: ItProfessionalData) {
+    await this.name.fill(data.name);
+    await this.cnic.fill(data.cnic);
+    await this.dateOfBirth.fill(data.dateOfBirth);
+    await this.genderGroup.getByText(data.gender, { exact: true }).click();
+    await this.email.fill(data.email);
+    await this.phone.fill(data.phone);
+    await this.password.fill(data.password);
+    await this.confirmPassword.fill(data.confirmPassword);
+    await this.yearsOfExperience.fill(data.yearsOfExperience);
+    await this.workStatusGroup.getByText(data.workStatus, { exact: true }).click();
+  }
+}
+
 export type InternationalCompanyData = {
   companyName: string;
   /** Option in the "Verticals" combobox. */
