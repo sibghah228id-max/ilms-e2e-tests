@@ -1,0 +1,838 @@
+diff --git a/tests/create-account/it-professional-signup.spec.ts b/tests/create-account/it-professional-signup.spec.ts
+new file mode 100644
+index 0000000..5c9089e
+--- /dev/null
++++ b/tests/create-account/it-professional-signup.spec.ts
+@@ -0,0 +1,239 @@
++import { test, expect } from '@playwright/test';
++import path from 'path';
++import { RoleSelectionPage, ItProfessionalRegistrationPage } from '../pages/create-account.page';
++import { OtpPage } from '../pages/otp.page';
++import {
++  itProfessionalSignupData,
++  itProfessionalOtpData,
++  uniqueItProfessionalData,
++} from '../data/it-professional-data';
++import { createInbox, fetchOtp } from '../helpers/mailtm';
++import { env, currentEnvName } from '../data/environments';
++import { AdminLoginPage } from '../pages/admin-login.page';
++import { AdminOtpPage } from '../pages/admin-otp.page';
++import { AdminUsersPage } from '../pages/admin-users.page';
++import { StudentLoginPage } from '../pages/login.page';
++import { DashboardPage } from '../pages/dashboard.page';
++import { PROFILE_COMPLETION_TARGET, STUDENT_ACTIVATION_STEPS } from '../data/dashboard-onboarding';
++import { ProfilePage, PROFESSIONAL_PROFILE_STEP_HEADINGS } from '../pages/profile.page';
++import { DigitalCvPage } from '../pages/digital-cv.page';
++import { itProfessionalProfileData } from '../data/it-professional-profile-data';
++
++const { form: formData } = itProfessionalSignupData;
++const otpData = itProfessionalOtpData;
++
++/** Profile picture uploaded on Personal Details (PNG, matching the upload control's accepted types). */
++const profileImagePath = path.resolve(__dirname, '../fixtures/profile-image.png');
++
++/**
++ * Full IT Professional signup: login → Sign Up → IT Professional → form → OTP (from a mail.tm inbox)
++ * → dashboard, then the master admin verifies that professional's PakID in a second tab: admin login
++ * + OTP → Userbase → INDUS Users → IT Professionals → the professional's row → Actions → Verify
++ * PakID → row shows PakID verified, and finally the professional logs out and back in (second
++ * emailed OTP) to see the PakID step completed on the activation checklist and open the profile
++ * page from "Complete Profile".
++ *
++ * Static fixtures (defaults, placeholders) live in tests/data/it-professional-signup.json.
++ * Every run generates a brand-new name/CNIC/email/phone (see uniqueItProfessionalData), so the
++ * portal never sees a duplicate account. Each run leaves a real account behind on the portal.
++ */
++test.describe('IT Professional signup (end to end)', () => {
++  // Two real email round-trips, the admin panel in a second tab and the profile wizard, so give it room.
++  test.setTimeout(9 * 60_000);
++
++  test('registers a new IT Professional, gets PakID-verified by the admin, and sees it completed after re-login', async ({
++    page,
++  }) => {
++    // A fresh disposable inbox per run; its address is the email the portal sends the OTP to.
++    const inbox = await createInbox(`pro${Date.now()}${Math.floor(Math.random() * 1000)}`);
++    const professional = uniqueItProfessionalData(inbox.address);
++    test.info().annotations.push({ type: 'professional', description: JSON.stringify(professional) });
++
++    // Login → Sign Up
++    await page.goto(env.portal.loginPath, { waitUntil: 'networkidle' });
++    await page.getByRole('link', { name: 'Sign Up', exact: true }).click();
++    await expect(page).toHaveURL(/\/create-account\/?$/);
++
++    // IT Professional → Create Account
++    const rolePage = new RoleSelectionPage(page);
++    await rolePage.roleCard('IT Professional').click();
++    await rolePage.createAccountButton.click();
++    await expect(page).toHaveURL(/\/create-account\/it-professional\/?$/);
++
++    // Registration form
++    const form = new ItProfessionalRegistrationPage(page);
++    await form.expectVisible();
++    await expect(form.name).toHaveAttribute('placeholder', formData.placeholders.name);
++    await expect(form.cnic).toHaveAttribute('placeholder', formData.placeholders.cnic);
++    await expect(form.email).toHaveAttribute('placeholder', formData.placeholders.email);
++    await expect(form.phone).toHaveAttribute('placeholder', formData.placeholders.phone);
++    await expect(form.yearsOfExperience).toHaveAttribute('placeholder', formData.placeholders.yearsOfExperience);
++    await expect(form.phoneCountry).toContainText(formData.phoneCountryLabel);
++
++    await form.fill(professional);
++
++    // Password is masked by default and the eye button reveals it.
++    await expect(form.password).toHaveAttribute('type', 'password');
++    await form.eyeButton(form.password).click();
++    await expect(form.password).toHaveAttribute('type', 'text');
++    await form.eyeButton(form.password).click();
++    await expect(form.password).toHaveAttribute('type', 'password');
++
++    await expect(form.genderGroup.getByRole('radio', { name: professional.gender, exact: true })).toBeChecked();
++    await expect(
++      form.workStatusGroup.getByRole('radio', { name: professional.workStatus, exact: true }),
++    ).toBeChecked();
++    await expect(form.phone).toHaveValue(professional.phone);
++    await expect(form.yearsOfExperience).toHaveValue(professional.yearsOfExperience);
++
++    await form.submitButton.click();
++
++    // OTP page
++    const otpPage = new OtpPage(page);
++    await otpPage.expectVisible();
++
++    const otp = await fetchOtp(inbox, { subject: new RegExp(otpData.emailSubject, 'i') });
++    test.info().annotations.push({ type: 'otp', description: otp });
++
++    await otpPage.verify(otp);
++
++    await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
++
++    // Open the admin portal in a separate tab while preserving the professional session.
++    const adminPage = await page.context().newPage();
++
++    // Admin login (email + password), then the OTP step.
++    const adminLogin = new AdminLoginPage(adminPage);
++    await adminLogin.goto();
++    await adminLogin.login(env.admin.email, env.admin.password);
++
++    const adminOtpPage = new AdminOtpPage(adminPage);
++    await adminOtpPage.expectVisible();
++
++    if (currentEnvName() === 'staging') {
++      if (!env.admin.fixedOtp) {
++        throw new Error('Fixed admin OTP is required for staging.');
++      }
++
++      // Staging uses the fixed admin OTP configured for automated testing.
++      await adminOtpPage.verify(env.admin.fixedOtp);
++    } else {
++      // Other environments email a one-time code to the admin mailbox, which the suite cannot read.
++      throw new Error(`Admin OTP for "${currentEnvName()}" is emailed; only staging has a fixed code.`);
++    }
++
++    // The admin dashboard greets the signed-in administrator.
++    await expect(adminPage).toHaveURL(/\/securecontroller\/dashboard/);
++    await expect(adminPage.getByRole('heading', { name: /^Hello, / })).toBeVisible();
++
++    // Userbase → INDUS Users → IT Professionals, through the sidebar and stakeholder tabs.
++    const adminUsers = new AdminUsersPage(adminPage);
++    await adminUsers.openIndusUsers();
++    await adminUsers.selectItProfessional();
++
++    // Locate the exact professional created during this test run before performing admin actions.
++    await adminUsers.searchUser(professional.email);
++    const professionalRow = adminUsers.userRow(professional.email);
++    await expect(professionalRow).toHaveCount(1);
++    await expect(professionalRow).toContainText(professional.email);
++    await expect(professionalRow).toContainText(professional.cnic);
++    await expect(await adminUsers.pakIdPill(professional.email)).toHaveAttribute('title', /PakID not verified/i);
++
++    // Verify the professional's CNIC through the admin action menu.
++    await adminUsers.verifyCnicForUser(professional.email, professional.cnic);
++    await expect(adminUsers.verificationFlash(professional.email)).toContainText(
++      `(CNIC on file: ${professional.cnic})`,
++    );
++
++    // Confirm PakID verification is reflected on the same professional's row.
++    await adminUsers.expectPakIdVerified(professional.email);
++
++    // The admin tab has served its purpose; the professional dashboard tab stays open.
++    await adminPage.close();
++
++    // Re-login the same professional after admin-side PakID verification.
++    // The original tab is still signed in, so log out through the UI to get a fresh login. The
++    // welcome preview still covers the dashboard on that tab; skipping it also keeps it from
++    // coming back on the next login.
++    await page.bringToFront();
++    const dashboard = new DashboardPage(page);
++    await dashboard.dismissOnboarding();
++    await dashboard.logout();
++
++    const professionalLogin = new StudentLoginPage(page);
++    await professionalLogin.expectVisible();
++    await professionalLogin.login(professional.email, professional.password);
++
++    // Login also asks for an emailed OTP; the signup code is still in the inbox, so skip it.
++    await otpPage.expectVisible();
++    const loginOtp = await fetchOtp(inbox, {
++      subject: new RegExp(otpData.emailSubject, 'i'),
++      ignoreCodes: [otp],
++    });
++    test.info().annotations.push({ type: 'login-otp', description: loginOtp });
++    await otpPage.verify(loginOtp);
++
++    await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
++    // The feature tour may follow now that the preview has been skipped.
++    await dashboard.dismissOnboarding();
++
++    await dashboard.expectActivationSection();
++    // Confirm the admin-side CNIC verification is reflected as a completed PakID step.
++    // IT Professionals share the same activation checklist as IT Students.
++    await dashboard.expectPakIdCompleted();
++    await dashboard.expectPakIdStep();
++    const completionPct = await dashboard.expectProfileCompletionStep();
++    await dashboard.expectPsebStep();
++    await dashboard.expectTalentHubStep();
++
++    // PakID now counts as done; the profile step joins it only from 80% completion, and the
++    // optional steps are untouched for a brand-new account.
++    const completedSteps = 1 + (completionPct >= PROFILE_COMPLETION_TARGET ? 1 : 0);
++    await dashboard.expectProgress(completedSteps, STUDENT_ACTIVATION_STEPS.length);
++
++    // Open the profile completion page from the second activation step.
++    await dashboard.openCompleteProfile();
++    await expect(page).toHaveURL(/\/profile\/?$/);
++    await expect(page.getByRole('heading', { name: 'Personal Details' })).toBeVisible({ timeout: 30_000 });
++
++    // Complete only missing profile information, one wizard step at a time.
++    const profilePage = new ProfilePage(page);
++    await profilePage.expectVisible();
++
++    // Preserve profile values already populated during registration and fill only missing required fields.
++    // IT Professional wizard order: Personal → Education → Work Experience → Skills → Certifications → Projects.
++    await profilePage.openPersonalDetails();
++    await profilePage.completeMissingPersonalDetails(itProfessionalProfileData.personal);
++    // Ensure a profile image is present before completing Personal Details.
++    await profilePage.ensureProfileImage(profileImagePath);
++    await profilePage.saveAndNext(PROFESSIONAL_PROFILE_STEP_HEADINGS.education);
++
++    await profilePage.completeMissingEducationDetails(itProfessionalProfileData.education);
++    await profilePage.saveAndNext(PROFESSIONAL_PROFILE_STEP_HEADINGS.experience);
++
++    // Add one experience record for the newly registered professional.
++    await profilePage.addExperience(itProfessionalProfileData.experience);
++    await profilePage.saveAndNext(PROFESSIONAL_PROFILE_STEP_HEADINGS.skills);
++
++    // Select valid skill/language options and assign proficiency ratings.
++    await profilePage.completeSkillsAndLanguages(itProfessionalProfileData.skills);
++    await profilePage.saveAndNext(PROFESSIONAL_PROFILE_STEP_HEADINGS.certifications);
++
++    // Certifications step: add a certificate record.
++    await profilePage.addCertificate(itProfessionalProfileData.certificate);
++    await profilePage.saveAndNext(PROFESSIONAL_PROFILE_STEP_HEADINGS.projects);
++
++    // Projects is the last step for IT Professionals; save without adding optional project records.
++    const savedPct = await profilePage.saveProfile();
++    expect(savedPct).toBeGreaterThan(completionPct);
++
++    // Open the generated Digital CV after completing the profile.
++    const digitalCv = new DigitalCvPage(page);
++    await digitalCv.open();
++    await digitalCv.expectCvOptions();
++
++    // The full CV carries the professional's name as its title (heading level depends on the template).
++    const cvPage = await digitalCv.openFullCv();
++    await expect(cvPage.getByRole('heading', { name: new RegExp(`^${professional.name}$`, 'i') })).toBeVisible();
++  });
++});
+diff --git a/tests/data/it-professional-data.ts b/tests/data/it-professional-data.ts
+new file mode 100644
+index 0000000..fad47ec
+--- /dev/null
++++ b/tests/data/it-professional-data.ts
+@@ -0,0 +1,57 @@
++import type { ItProfessionalData } from '../pages/create-account.page';
++import signupData from './it-professional-signup.json';
++import { studentSignupData } from './student-data';
++
++/** Static IT Professional signup fixtures (defaults, form labels) from it-professional-signup.json. */
++export const itProfessionalSignupData = signupData;
++
++/** OTP mail subject is the same for every role. */
++export const itProfessionalOtpData = studentSignupData.otp;
++
++/**
++ * Fresh, unique IT Professional registration data for every call.
++ *
++ * The portal rejects duplicate emails and CNICs, so the identity fields are never hard-coded:
++ * the timestamp + a random tail seed the name, CNIC and phone, and the email is the address of
++ * a throwaway inbox created per run (see helpers/mailtm.ts). Everything else (date of birth,
++ * gender, password, years of experience, work status) comes from it-professional-signup.json.
++ */
++export function uniqueItProfessionalData(
++  email: string,
++  overrides: Partial<ItProfessionalData> = {},
++): ItProfessionalData {
++  const { professional } = itProfessionalSignupData;
++
++  const stamp = Date.now().toString(); // 13 digits
++  const rand = Math.floor(Math.random() * 1000)
++    .toString()
++    .padStart(3, '0');
++  const tag = `${stamp.slice(-8)}${rand}`; // 11 digits, unique enough per run
++
++  // CNIC: 13 digits, no dashes. Timestamp is already 13 digits; swap the tail for randomness.
++  const cnic = stamp.slice(0, 10) + rand;
++
++  // Phone: the field has maxlength 10 and the +92 code is fixed, so use a 3XXXXXXXXX mobile number.
++  const phone = '3' + tag.slice(-9);
++
++  return {
++    // The portal only allows English letters (and spaces) in the name, so encode the tag as letters.
++    name: `${professional.namePrefix} ${digitsToLetters(tag)}`,
++    cnic,
++    dateOfBirth: professional.dateOfBirth,
++    gender: professional.gender as ItProfessionalData['gender'],
++    email,
++    phone,
++    password: professional.password,
++    confirmPassword: professional.password,
++    yearsOfExperience: professional.yearsOfExperience,
++    workStatus: professional.workStatus as ItProfessionalData['workStatus'],
++    ...overrides,
++  };
++}
++
++/** "0123456789" → "ABCDEFGHIJ", capitalised so it reads like a surname (e.g. "Bcfgh"). */
++function digitsToLetters(digits: string): string {
++  const letters = digits.replace(/\d/g, (d) => String.fromCharCode(97 + Number(d)));
++  return letters.charAt(0).toUpperCase() + letters.slice(1);
++}
+diff --git a/tests/data/it-professional-profile-data.ts b/tests/data/it-professional-profile-data.ts
+new file mode 100644
+index 0000000..606a34d
+--- /dev/null
++++ b/tests/data/it-professional-profile-data.ts
+@@ -0,0 +1,70 @@
++import { isoDateMonthsAgo, type SkillRating } from './student-profile-data';
++
++/**
++ * Test data for completing an IT Professional profile on /profile.
++ *
++ * Only fields that are still empty after registration are filled from here; values that the
++ * portal pre-populates (name, email, phone, date of birth, gender) are verified and left alone.
++ * Dropdown values below were read from the staging option lists.
++ */
++export const itProfessionalProfileData = {
++  personal: {
++    citySearch: 'Islamabad',
++    address: 'House 8, Street 12, Sector F-8',
++    description:
++      'IT professional focused on full-stack development and cloud delivery, looking to grow through industry projects and mentorship.',
++  },
++
++  education: {
++    degreeType: 'Bachelors',
++    institutionSearch: 'Air',
++    institution: 'Air University',
++    campus: 'Air University Islamabad Campus',
++    department: 'Computer Science',
++    program: 'Computer Science · Bachelors',
++    studentId: 'AU-PRO-2020-0001',
++    // Professionals use End Year (Currently Studying defaults to No); semester is student-only.
++    startYear: isoDateMonthsAgo(72).slice(0, 7),
++    endYear: isoDateMonthsAgo(24).slice(0, 7),
++  },
++
++  skills: {
++    core: { name: 'Communication', rating: 80 } as SkillRating,
++    secondary: { name: 'Leadership', rating: 70 } as SkillRating,
++    technical: { name: 'JavaScript', rating: 85 } as SkillRating,
++    language: { name: 'English', rating: 90 } as SkillRating,
++  },
++
++  experience: {
++    jobType: 'Full Time',
++    jobTitle: 'Software Engineer',
++    company: 'Test Technology Solutions',
++    startDate: isoDateMonthsAgo(36),
++    endDate: isoDateMonthsAgo(2),
++    skillGained: 'Software Development',
++    description:
++      'Delivered web application features, API integration, testing, and collaboration with cross-functional teams.',
++  },
++
++  certificate: {
++    name: 'Cloud Practitioner Fundamentals',
++    issuingOrganization: 'INDUS Test Academy',
++    issuedDate: isoDateMonthsAgo(10),
++    credential: 'CERT-PRO-001',
++  },
++
++  achievement: {
++    award: 'Outstanding Project Delivery',
++    issuingOrganization: 'INDUS Test Institute',
++    awardedDate: isoDateMonthsAgo(12),
++  },
++
++  publication: {
++    title: 'Practical Patterns for Scalable Web Applications',
++    category: 'Research Paper',
++    publishDate: isoDateMonthsAgo(6),
++    link: 'https://example.com/publications/scalable-web-patterns',
++  },
++};
++
++export type ItProfessionalProfileData = typeof itProfessionalProfileData;
+diff --git a/tests/data/it-professional-signup.json b/tests/data/it-professional-signup.json
+new file mode 100644
+index 0000000..8aaabf4
+--- /dev/null
++++ b/tests/data/it-professional-signup.json
+@@ -0,0 +1,20 @@
++{
++  "professional": {
++    "namePrefix": "Test Professional",
++    "dateOfBirth": "1995-03-18",
++    "gender": "Male",
++    "password": "Pro@Pass2026",
++    "yearsOfExperience": "5",
++    "workStatus": "Employed"
++  },
++  "form": {
++    "placeholders": {
++      "name": "Enter your full name",
++      "cnic": "Enter 13-digit CNIC (no dashes)",
++      "email": "Enter your email address",
++      "phone": "Enter your phone number",
++      "yearsOfExperience": "e.g. 3"
++    },
++    "phoneCountryLabel": "PK | +92"
++  }
++}
+diff --git a/tests/helpers/mailtm.ts b/tests/helpers/mailtm.ts
+index b5d3822..87298bc 100644
+--- a/tests/helpers/mailtm.ts
++++ b/tests/helpers/mailtm.ts
+@@ -1,4 +1,4 @@
+-import signupData from '../data/student-signup.json';
++import signupData from "../data/student-signup.json";
+ 
+ /**
+  * Disposable inboxes via the mail.tm HTTP API (https://api.mail.tm).
+@@ -31,25 +31,36 @@ export type OtpOptions = {
+ };
+ 
+ type Domain = { domain: string; isActive: boolean };
+-type MessageSummary = { id: string; subject: string; from: { address: string } };
++type MessageSummary = {
++  id: string;
++  subject: string;
++  from: { address: string };
++};
+ type Message = MessageSummary & { text?: string; html?: string[] };
+ /** mail.tm returns a plain array for `application/json` and a hydra wrapper for `application/ld+json`. */
+-type Collection<T> = T[] | { 'hydra:member': T[] };
++type Collection<T> = T[] | { "hydra:member": T[] };
+ 
+-const members = <T>(c: Collection<T>): T[] => (Array.isArray(c) ? c : c['hydra:member'] ?? []);
++const members = <T>(c: Collection<T>): T[] =>
++  Array.isArray(c) ? c : (c["hydra:member"] ?? []);
+ 
+-async function api<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
++async function api<T>(
++  path: string,
++  init: RequestInit = {},
++  token?: string,
++): Promise<T> {
+   const res = await fetch(`${API_BASE_URL}${path}`, {
+     ...init,
+     headers: {
+-      Accept: 'application/json',
+-      'Content-Type': 'application/json',
++      Accept: "application/json",
++      "Content-Type": "application/json",
+       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+       ...(init.headers ?? {}),
+     },
+   });
+   if (!res.ok) {
+-    throw new Error(`mail.tm ${init.method ?? 'GET'} ${path} failed: ${res.status} ${res.statusText} ${await res.text()}`);
++    throw new Error(
++      `mail.tm ${init.method ?? "GET"} ${path} failed: ${res.status} ${res.statusText} ${await res.text()}`,
++    );
+   }
+   return (await res.json()) as T;
+ }
+@@ -59,18 +70,27 @@ async function api<T>(path: string, init: RequestInit = {}, token?: string): Pro
+  * `student<timestamp><random>` so every run registers a different email on the portal.
+  */
+ export async function createInbox(localPart?: string): Promise<Inbox> {
+-  const rand = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
++  const rand = Math.floor(Math.random() * 1000)
++    .toString()
++    .padStart(3, "0");
+   const name = (localPart ?? `student${Date.now()}${rand}`).toLowerCase();
+ 
+-  const domains = await api<Collection<Domain>>('/domains');
++  const domains = await api<Collection<Domain>>("/domains");
+   const domain = members(domains).find((d) => d.isActive)?.domain;
+-  if (!domain) throw new Error('mail.tm reported no active domain to create an inbox on');
++  if (!domain)
++    throw new Error("mail.tm reported no active domain to create an inbox on");
+ 
+   const address = `${name}@${domain}`;
+   const password = `Pw-${Date.now()}-${rand}`;
+ 
+-  await api('/accounts', { method: 'POST', body: JSON.stringify({ address, password }) });
+-  const { token } = await api<{ token: string }>('/token', { method: 'POST', body: JSON.stringify({ address, password }) });
++  await api("/accounts", {
++    method: "POST",
++    body: JSON.stringify({ address, password }),
++  });
++  const { token } = await api<{ token: string }>("/token", {
++    method: "POST",
++    body: JSON.stringify({ address, password }),
++  });
+ 
+   return { address, token };
+ }
+@@ -79,27 +99,50 @@ export async function createInbox(localPart?: string): Promise<Inbox> {
+  * Polls the inbox until a mail whose subject matches arrives, then returns the OTP found in it.
+  * Prefers the plain-text body; falls back to the HTML body with tags stripped.
+  */
+-export async function fetchOtp(inbox: Inbox, opts: OtpOptions = {}): Promise<string> {
+-  const { subject = /OTP/i, pattern = /\b(\d{6})\b/, timeoutMs = 90_000, pollMs = 3_000, ignoreCodes = [] } = opts;
+-  const subjectMatches = (s: string) => (typeof subject === 'string' ? s.includes(subject) : subject.test(s));
++export async function fetchOtp(
++  inbox: Inbox,
++  opts: OtpOptions = {},
++): Promise<string> {
++  const {
++    subject = /OTP/i,
++    pattern = /\b(\d{6})\b/,
++    timeoutMs = 90_000,
++    pollMs = 3_000,
++    ignoreCodes = [],
++  } = opts;
++  const subjectMatches = (s: string) =>
++    typeof subject === "string" ? s.includes(subject) : subject.test(s);
+ 
+   const deadline = Date.now() + timeoutMs;
+   let seen = 0;
+ 
+   while (Date.now() < deadline) {
+-    const list = await api<Collection<MessageSummary>>('/messages', {}, inbox.token);
++    const list = await api<Collection<MessageSummary>>(
++      "/messages",
++      {},
++      inbox.token,
++    );
+     const messages = members(list);
+     seen = messages.length;
+ 
+     // Several OTP mails can share the inbox (signup, then login), so look at every matching mail
+     // and skip the codes the caller has already used.
+     for (const summary of messages.filter((m) => subjectMatches(m.subject))) {
+-      const mail = await api<Message>(`/messages/${summary.id}`, {}, inbox.token);
+-      const html = (mail.html ?? []).join('\n').replace(/<[^>]+>/g, ' ');
+-      const candidates = [mail.text ?? '', html, mail.subject];
+-
+-      const code = candidates.map((body) => body.match(pattern)?.[1]).find(Boolean);
+-      if (!code) throw new Error(`Mail "${mail.subject}" arrived in ${inbox.address} but nothing in it matched ${pattern}`);
++      const mail = await api<Message>(
++        `/messages/${summary.id}`,
++        {},
++        inbox.token,
++      );
++      const html = (mail.html ?? []).join("\n").replace(/<[^>]+>/g, " ");
++      const candidates = [mail.text ?? "", html, mail.subject];
++
++      const code = candidates
++        .map((body) => body.match(pattern)?.[1])
++        .find(Boolean);
++      if (!code)
++        throw new Error(
++          `Mail "${mail.subject}" arrived in ${inbox.address} but nothing in it matched ${pattern}`,
++        );
+       if (!ignoreCodes.includes(code)) return code;
+     }
+ 
+diff --git a/tests/pages/admin-users.page.ts b/tests/pages/admin-users.page.ts
+index dae8569..e82b031 100644
+--- a/tests/pages/admin-users.page.ts
++++ b/tests/pages/admin-users.page.ts
+@@ -11,8 +11,9 @@ export class AdminUsersPage {
+   readonly userbaseToggle: Locator;
+   readonly indusUsersLink: Locator;
+   readonly heading: Locator;
+-  /** Stakeholder tabs above the table ("IT Students", "IT Companies", ...). */
++  /** Stakeholder tabs above the table ("IT Students", "IT Professionals", "IT Companies", ...). */
+   readonly itStudentsTab: Locator;
++  readonly itProfessionalsTab: Locator;
+   readonly table: Locator;
+   /** Search box above the table; matches name, email, phone, CNIC or "#id". */
+   readonly searchBox: Locator;
+@@ -26,6 +27,7 @@ export class AdminUsersPage {
+     this.indusUsersLink = page.getByRole('link', { name: 'INDUS Users' });
+     this.heading = page.getByRole('heading', { name: 'INDUS Users' });
+     this.itStudentsTab = page.getByRole('link', { name: 'IT Students' });
++    this.itProfessionalsTab = page.getByRole('link', { name: 'IT Professionals' });
+     this.table = page.getByRole('table');
+     this.searchBox = page.getByPlaceholder(/^Name, email, phone, CNIC/);
+     this.cnicModal = page.locator('[role="dialog"][aria-labelledby="cnic-modal-title"]');
+@@ -58,6 +60,14 @@ export class AdminUsersPage {
+     await this.page.waitForLoadState('load');
+   }
+ 
++  /** Switches the list to IT Professionals (stakeholder_type_id=2) and waits for the table. */
++  async selectItProfessional() {
++    await this.itProfessionalsTab.click();
++    await expect(this.page).toHaveURL(/\/securecontroller\/users\?.*stakeholder_type_id=2/);
++    await expect(this.table).toBeVisible();
++    await this.page.waitForLoadState('load');
++  }
++
+   /**
+    * Filters the list with its search box (name, email, phone, CNIC or #id). The form is a plain
+    * GET, so the page reloads with `search=` in the URL and the table shows the matches only.
+diff --git a/tests/pages/create-account.page.ts b/tests/pages/create-account.page.ts
+index 4d80feb..7c6fd59 100644
+--- a/tests/pages/create-account.page.ts
++++ b/tests/pages/create-account.page.ts
+@@ -141,6 +141,80 @@ export class StudentRegistrationPage {
+   }
+ }
+ 
++export type ItProfessionalData = {
++  name: string;
++  cnic: string;
++  dateOfBirth: string; // YYYY-MM-DD
++  gender: 'Male' | 'Female' | 'Other';
++  email: string;
++  phone: string;
++  password: string;
++  confirmPassword: string;
++  yearsOfExperience: string;
++  workStatus: 'Employed' | 'Freelancer' | 'Unemployed';
++};
++
++/** IT Professional registration form: /create-account/it-professional */
++export class ItProfessionalRegistrationPage {
++  readonly name: Locator;
++  readonly cnic: Locator;
++  readonly dateOfBirth: Locator;
++  readonly genderGroup: Locator;
++  readonly email: Locator;
++  /** Phone country-code selector (defaults to "PK | +92"). */
++  readonly phoneCountry: Locator;
++  readonly phone: Locator;
++  readonly password: Locator;
++  readonly confirmPassword: Locator;
++  readonly yearsOfExperience: Locator;
++  readonly workStatusGroup: Locator;
++  readonly submitButton: Locator;
++
++  constructor(private readonly page: Page) {
++    this.name = page.locator('#name');
++    this.cnic = page.locator('#cnic');
++    this.dateOfBirth = page.locator('#dateOfBirth');
++    this.genderGroup = page.getByRole('radiogroup', { name: 'Gender' });
++    this.email = page.locator('#email');
++    // Prefer the visible country button over getByText('PK | +92'), which also matches a <option>.
++    this.phoneCountry = page.getByRole('button', { name: /^PK \| \+92/ });
++    // Professional form uses #phoneNumber (student form uses #phone_e164).
++    this.phone = page.locator('#phoneNumber');
++    this.password = page.locator('#password');
++    this.confirmPassword = page.locator('#confirmPassword');
++    this.yearsOfExperience = page.locator('#yearsExperience');
++    this.workStatusGroup = page.getByRole('radiogroup', { name: 'Current Work Status' });
++    this.submitButton = page.getByRole('button', { name: 'Create Account', exact: true });
++  }
++
++  async goto() {
++    await this.page.goto('/create-account/it-professional', { waitUntil: 'networkidle' });
++  }
++
++  async expectVisible() {
++    await expect(this.page).toHaveURL(/\/create-account\/it-professional\/?$/);
++    await expect(this.name).toBeVisible();
++  }
++
++  /** The "Show password" eye button inside the same field wrapper as `input`. */
++  eyeButton(input: Locator): Locator {
++    return input.locator('xpath=..').getByRole('button', { name: /show password|hide password/i });
++  }
++
++  async fill(data: ItProfessionalData) {
++    await this.name.fill(data.name);
++    await this.cnic.fill(data.cnic);
++    await this.dateOfBirth.fill(data.dateOfBirth);
++    await this.genderGroup.getByText(data.gender, { exact: true }).click();
++    await this.email.fill(data.email);
++    await this.phone.fill(data.phone);
++    await this.password.fill(data.password);
++    await this.confirmPassword.fill(data.confirmPassword);
++    await this.yearsOfExperience.fill(data.yearsOfExperience);
++    await this.workStatusGroup.getByText(data.workStatus, { exact: true }).click();
++  }
++}
++
+ export type InternationalCompanyData = {
+   companyName: string;
+   /** Option in the "Verticals" combobox. */
+diff --git a/tests/pages/profile.page.ts b/tests/pages/profile.page.ts
+index bfa1e5b..6216b00 100644
+--- a/tests/pages/profile.page.ts
++++ b/tests/pages/profile.page.ts
+@@ -19,6 +19,17 @@ export const PROFILE_STEP_HEADINGS = {
+   achievements: 'Certificates',
+ } as const;
+ 
++/** Main headings for the IT Professional wizard (Work Experience comes before Skills). */
++export const PROFESSIONAL_PROFILE_STEP_HEADINGS = {
++  personal: 'Personal Details',
++  education: 'Educations',
++  /** Work Experience step; the form heading matches the student Experience step. */
++  experience: 'Experience',
++  skills: 'Skills & Language',
++  certifications: 'Certificates',
++  projects: 'Projects',
++} as const;
++
+ /**
+  * Student profile wizard: /profile.
+  *
+@@ -39,7 +50,8 @@ export class ProfilePage {
+     this.main = page.locator('main');
+     this.saveAndNextButton = page.getByRole('button', { name: 'Save & Next', exact: true });
+     this.saveButton = page.getByRole('button', { name: 'Save', exact: true });
+-    this.savedToast = page.getByText('Data saved successfully!');
++    // Several saves in one run can leave stacked Toastify alerts with the same copy; assert the newest.
++    this.savedToast = page.getByRole('alert').filter({ hasText: 'Data saved successfully!' }).last();
+   }
+ 
+   async expectVisible() {
+@@ -201,7 +213,9 @@ export class ProfilePage {
+    * again once the network is quiet and the click is repeated if it vanished.
+    */
+   private async addRecordSection(buttonName: string, sectionHeading: string) {
+-    const section = this.main.getByRole('heading', { name: sectionHeading, exact: true });
++    // Prefer the first matching heading: some roles reuse the same title for every record
++    // (e.g. IT Professional education sections are all "Education Details").
++    const section = this.main.getByRole('heading', { name: sectionHeading, exact: true }).first();
+     await expect(async () => {
+       if (!(await section.isVisible())) {
+         await this.page.getByRole('button', { name: buttonName, exact: true }).click();
+@@ -304,37 +318,61 @@ export class ProfilePage {
+   // ---- Step 2: Education --------------------------------------------------------------------
+ 
+   /**
+-   * Registration created one education record; the university chosen at signup may already be
+-   * in it. Whatever is present is kept, the rest of that same record is completed, and no second
+-   * record is added.
++   * Completes the first education record. IT Students already have one from registration (the
++   * university chosen at signup may already be in it); IT Professionals start with none, so an
++   * "Add Education" record is created first (section heading "Education Details"). Whatever is
++   * present is kept, the rest of that same record is completed, and no second record is added.
+    */
+-  async completeMissingEducationDetails(data: StudentProfileData['education']) {
++  async completeMissingEducationDetails(
++    data: Omit<StudentProfileData['education'], 'semester'> & { semester?: string; endYear?: string },
++  ) {
+     // The step fetches its option lists after it opens, and picking Campus, Department or Program
+     // reloads the dependent lists. A selection made before such a reload keeps its text but loses
+     // its key, so Degree Type is picked last, once the network is quiet, and everything is
+     // re-checked right before the caller saves.
+     await this.page.waitForLoadState('networkidle');
++
++    // Students get educations.0 from signup; IT Professionals show an empty step until added.
++    // The added section is headed "Education Details" (not "Education 1").
++    if ((await this.byId('educations.0.institutionId').count()) === 0) {
++      await this.addRecordSection('Add Education', 'Education Details');
++    }
++
+     await this.pickComboIfEmpty(this.byId('educations.0.institutionId'), data.institutionSearch, data.institution);
+     await this.pickComboIfEmpty(this.byId('educations.0.campusId'), '', new RegExp(`^${escapeRegExp(data.campus)}`));
+     await this.pickComboIfEmpty(this.byId('educations.0.departmentId'), '', data.department);
+     await this.pickComboIfEmpty(this.byId('educations.0.department'), '', data.program);
+     await this.fillIfEmpty(this.byId('educations.0.studentId'), data.studentId);
+-    await this.pickComboIfEmpty(this.byId('educations.0.semester'), '', data.semester);
++
++    // Semester is student-only; professionals use Subjects / End Year instead.
++    const semester = this.byId('educations.0.semester');
++    if ((await semester.count()) > 0 && data.semester) {
++      await this.pickComboIfEmpty(semester, '', data.semester);
++    }
++
+     await this.fillIfEmpty(this.byId('educations.0.startYear'), data.startYear);
+ 
++    const endYear = this.byId('educations.0.endYear');
++    if ((await endYear.count()) > 0 && data.endYear) {
++      await this.fillIfEmpty(endYear, data.endYear);
++    }
++
+     await this.page.waitForLoadState('networkidle');
+     await this.pickComboIfEmpty(this.byId('educations.0.degreeType'), data.degreeType.slice(0, 4), new RegExp(`^${data.degreeType}`));
+ 
+-    for (const id of [
++    const requiredIds = [
+       'educations.0.degreeType',
+       'educations.0.institutionId',
+       'educations.0.campusId',
+       'educations.0.departmentId',
+       'educations.0.department',
+       'educations.0.studentId',
+-      'educations.0.semester',
+       'educations.0.startYear',
+-    ]) {
++    ];
++    if ((await semester.count()) > 0 && data.semester) requiredIds.push('educations.0.semester');
++    if ((await endYear.count()) > 0 && data.endYear) requiredIds.push('educations.0.endYear');
++
++    for (const id of requiredIds) {
+       await expect(this.byId(id), `${id} should still hold its value before saving`).not.toHaveValue('');
+     }
+   }
+@@ -369,14 +407,42 @@ export class ProfilePage {
+     return this.main.getByText(skillName, { exact: true }).locator('xpath=following-sibling::*[1]').getByRole('slider');
+   }
+ 
++  /**
++   * Dismisses sticky/sidebar "Profile Completion" strips that sit over the top of the form and
++   * intercept clicks (common once completion climbs during the wizard).
++   */
++  async dismissProfileCompletionOverlays() {
++    const candidates = [
++      this.page.locator('div.sticky').getByRole('button', { name: 'Dismiss', exact: true }),
++      this.page.locator('div.sticky').getByRole('button', { name: 'Close', exact: true }),
++      this.page.getByRole('button', { name: 'Dismiss', exact: true }),
++    ];
++    for (const btn of candidates) {
++      if (await btn.first().isVisible().catch(() => false)) {
++        await btn.first().click();
++        await expect(btn.first()).toBeHidden({ timeout: 5_000 }).catch(() => undefined);
++        break;
++      }
++    }
++  }
++
+   // ---- Step 4: Experience -------------------------------------------------------------------
+ 
+   /** Adds a single experience record; nothing exists here for a freshly registered student. */
+   async addExperience(data: StudentProfileData['experience']) {
++    await this.dismissProfileCompletionOverlays();
+     await expect(this.main.getByRole('heading', { name: /^Experience \d+$/ })).toHaveCount(0);
+     await this.addRecordSection('Add Experience', 'Experience 1');
+ 
+-    await this.page.getByRole('radio', { name: data.jobType, exact: true }).check();
++    // React-aria radios: the <input> is covered by its <label>, so click the visible label text
++    // (same pattern as Gender on the registration form). Skip if already selected.
++    const jobTypeGroup = this.page.getByRole('radiogroup', { name: 'Job Type' });
++    const jobTypeRadio = jobTypeGroup.getByRole('radio', { name: data.jobType, exact: true });
++    if (!(await jobTypeRadio.isChecked())) {
++      await jobTypeGroup.getByText(data.jobType, { exact: true }).click();
++    }
++    await expect(jobTypeRadio).toBeChecked();
++
+     await this.byId('experiences.0.title').fill(data.jobTitle);
+     await this.byId('experiences.0.company').fill(data.company);
+     await this.byId('experiences.0.startDate').fill(data.startDate);
