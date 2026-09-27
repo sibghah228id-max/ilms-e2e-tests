@@ -35,7 +35,7 @@ export class ProfilePage {
   readonly saveButton: Locator;
   readonly savedToast: Locator;
 
-  constructor(private readonly page: Page) {
+  constructor(protected readonly page: Page) {
     this.main = page.locator('main');
     this.saveAndNextButton = page.getByRole('button', { name: 'Save & Next', exact: true });
     this.saveButton = page.getByRole('button', { name: 'Save', exact: true });
@@ -67,7 +67,7 @@ export class ProfilePage {
   }
 
   /** Input with id `id` (ids of repeatable records contain dots, so an attribute selector is used). */
-  private byId(id: string): Locator {
+  protected byId(id: string): Locator {
     return this.page.locator(`[id="${id}"]`);
   }
 
@@ -185,7 +185,7 @@ export class ProfilePage {
     // A step that fails validation stays put and shows "… is required" messages; report those
     // rather than a bare missing-heading timeout.
     const next = this.heading(nextHeading);
-    const validationMessage = this.main.getByText(/is required/i);
+    const validationMessage = this.main.getByText(/is required|must (be|contain)/i);
     await expect(next.or(validationMessage).first()).toBeVisible({ timeout: 30_000 });
     if (!(await next.isVisible())) {
       throw new Error(`"Save & Next" was rejected: ${(await validationMessage.allInnerTexts()).join('; ')}`);
@@ -252,12 +252,12 @@ export class ProfilePage {
   // ---- Step 1: profile image ----------------------------------------------------------------
 
   /** Hidden file input behind the "Upload avatar" control next to the avatar (PNG/JPEG). */
-  private get avatarInput(): Locator {
+  protected get avatarInput(): Locator {
     return this.page.locator('#avatar-upload');
   }
 
   /** Uploaded avatar shown in the Personal Details header; absent while the placeholder icon shows. */
-  private get avatarImage(): Locator {
+  protected get avatarImage(): Locator {
     return this.main.getByRole('img', { name: 'Profile Picture' });
   }
 
@@ -282,7 +282,12 @@ export class ProfilePage {
     const response = await uploaded;
     expect(response.ok(), `avatar upload responded ${response.status()}`).toBeTruthy();
     await expect(cropDialog).toBeHidden();
-    await expect(this.page.getByText('Avatar updated successfully!')).toBeVisible();
+    await expect(this.avatarUpdatedToast).toBeVisible();
+  }
+
+  /** Success toast after the upload; companies get different wording (see CompanyProfilePage). */
+  protected get avatarUpdatedToast(): Locator {
+    return this.page.getByText('Avatar updated successfully!');
   }
 
   /** The avatar is rendered from the stored upload rather than the placeholder icon. */

@@ -195,6 +195,25 @@ export class DashboardPage {
     await this.tour.skipIfShown(tourTimeout);
   }
 
+  /**
+   * Walks the welcome preview with "Next" until its finishing button, then skips the feature tour.
+   * The preview appears only after the dashboard has fetched the walkthrough state, so it gets a
+   * moment to show up; if it opens without a way forward, "Skip preview" is the fallback.
+   */
+  async completeOnboarding(previewTimeout = 10_000, tourTimeout = 10_000) {
+    const shown = await this.preview.dialog.waitFor({ state: 'visible', timeout: previewTimeout }).then(() => true, () => false);
+    if (shown) {
+      while (await this.preview.nextButton.isVisible()) await this.preview.nextButton.click();
+      if (await this.preview.finishButton.isVisible()) {
+        await this.preview.finishButton.click();
+      } else {
+        await this.preview.skipButton.click();
+      }
+      await expect(this.preview.dialog).toBeHidden();
+    }
+    await this.tour.skipIfShown(tourTimeout);
+  }
+
   /** Sidebar "Log Out"; the portal returns to the login page. */
   async logout() {
     await this.logoutLink.click();

@@ -1,4 +1,33 @@
 import type { InternationalCompanyData } from '../pages/create-account.page';
+import { isoMonthMonthsAgo, type SkillRating } from './student-profile-data';
+
+/**
+ * Values for the company profile wizard (/profile). Only fields still empty after registration
+ * are filled from here; dropdown values were read from the staging option lists.
+ */
+export const internationalCompanyProfileData = {
+  information: {
+    foundingYear: isoMonthMonthsAgo(60),
+    website: 'https://www.test-intl-company.example.com',
+    linkedin: 'https://linkedin.com/company/test-intl-company',
+    address: '100 Market Street, Suite 400, San Francisco, CA',
+    description:
+      'International technology company sourcing verified Pakistani IT talent for software projects and remote roles.',
+  },
+  contact: {
+    designation: 'Chief Executive Officer (CEO)',
+  },
+  // One option per category; ratings are fixed so a failed run is reproducible.
+  expertise: {
+    core: { name: 'Communication', rating: 75 } as SkillRating,
+    secondary: { name: 'Leadership', rating: 65 } as SkillRating,
+    technical: { name: 'JavaScript', rating: 80 } as SkillRating,
+    tools: { name: 'GitHub', rating: 85 } as SkillRating,
+    language: { name: 'English', rating: 90 } as SkillRating,
+  },
+};
+
+export type InternationalCompanyProfileData = typeof internationalCompanyProfileData;
 
 /** Static International Company signup fixtures (dropdown values as listed on staging). */
 export const internationalCompanySignupData = {
@@ -38,7 +67,9 @@ export function uniqueInternationalCompanyData(
   const tag = `${stamp.slice(-8)}${rand}`;
 
   return {
-    companyName: `${company.namePrefix} ${tag}`,
+    // The company name is reused as the contact person's name, which allows English letters only,
+    // so the tag is encoded as letters ("0123456789" → "Abcdefghij").
+    companyName: `${company.namePrefix} ${digitsToLetters(tag)}`,
     vertical: company.vertical,
     email,
     // Phone field is capped at 10 digits behind the fixed +92 code, so use a 3XXXXXXXXX mobile number.
@@ -49,4 +80,10 @@ export function uniqueInternationalCompanyData(
     countryOption: company.countryOption,
     ...overrides,
   };
+}
+
+/** "0123456789" → "Abcdefghij", capitalised so it reads like a name. */
+function digitsToLetters(digits: string): string {
+  const letters = digits.replace(/\d/g, (d) => String.fromCharCode(97 + Number(d)));
+  return letters.charAt(0).toUpperCase() + letters.slice(1);
 }
