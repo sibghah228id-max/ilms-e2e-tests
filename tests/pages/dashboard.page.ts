@@ -227,6 +227,25 @@ export class DashboardPage {
     await expect(this.checklist.items).toHaveCount(STUDENT_ACTIVATION_STEPS.length);
   }
 
+  /**
+   * Checklist for any role: heading, description, one row per expected step with its title,
+   * description (live percentage filled in) and, unless completed, its action control. Returns
+   * the "N of M completed" counts so the caller can assert them against the account's state.
+   */
+  async expectActivationChecklist(steps: ActivationStep[]): Promise<{ done: number; total: number }> {
+    await this.checklist.expectVisible();
+    await expect(this.checklist.heading).toHaveText(ACTIVATION_CHECKLIST.heading);
+    await expect(this.checklist.description).toHaveText(ACTIVATION_CHECKLIST.description);
+    await expect(this.checklist.items).toHaveCount(steps.length);
+
+    const profileStep = steps.find((s) => s.description.includes('{pct}'));
+    const pct = profileStep ? await this.checklist.profileCompletionPct(profileStep.title) : undefined;
+    for (const step of steps) {
+      await this.expectStep(step, pct);
+    }
+    return this.checklist.progressCounts();
+  }
+
   /** "N of M completed" counter. */
   async expectProgress(done: number, total: number) {
     await expect(this.checklist.progress).toHaveText(`${done} of ${total} completed`);

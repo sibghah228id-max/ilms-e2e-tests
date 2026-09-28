@@ -294,3 +294,97 @@ export class InternationalCompanyRegistrationPage {
     await this.selectOption(this.country, data.countrySearch, data.countryOption);
   }
 }
+
+export type ItCompanyData = {
+  companyName: string;
+  /** Option in the "Company Type" combobox. */
+  companyType: string;
+  email: string;
+  phone: string;
+  password: string;
+  confirmPassword: string;
+  address: string;
+  /** Text typed into the "City" combobox and the option it must resolve to. */
+  citySearch: string;
+  cityOption: string | RegExp;
+  website: string;
+  /** Option in the "Verticals" combobox. */
+  vertical: string;
+};
+
+/** IT Company registration form: /create-account/it-company */
+export class ItCompanyRegistrationPage {
+  readonly companyName: Locator;
+  readonly companyType: Locator;
+  readonly email: Locator;
+  /** Phone country-code selector (defaults to "PK | +92"). */
+  readonly phoneCountry: Locator;
+  readonly phone: Locator;
+  readonly password: Locator;
+  readonly confirmPassword: Locator;
+  readonly address: Locator;
+  readonly city: Locator;
+  readonly website: Locator;
+  readonly vertical: Locator;
+  readonly submitButton: Locator;
+
+  constructor(private readonly page: Page) {
+    this.companyName = page.locator('#companyName');
+    this.companyType = page.getByRole('combobox', { name: /^Company Type/ });
+    this.email = page.locator('#email');
+    this.phoneCountry = page.getByRole('button', { name: /^PK \| \+92/ });
+    this.phone = page.locator('#phoneNumber');
+    this.password = page.locator('#password');
+    this.confirmPassword = page.locator('#confirmPassword');
+    this.address = page.locator('#address');
+    this.city = page.getByRole('combobox', { name: /^City/ });
+    this.website = page.locator('#companyWebsite');
+    this.vertical = page.getByRole('combobox', { name: /^Verticals/ });
+    this.submitButton = page.getByRole('button', { name: 'Create Account', exact: true });
+  }
+
+  async goto() {
+    await this.page.goto('/create-account/it-company', { waitUntil: 'networkidle' });
+  }
+
+  async expectVisible() {
+    await expect(this.page).toHaveURL(/\/create-account\/it-company\/?$/);
+    await expect(this.companyName).toBeVisible();
+  }
+
+  /** The "Show password" eye button inside the same field wrapper as `input`. */
+  eyeButton(input: Locator): Locator {
+    return input.locator('xpath=..').getByRole('button', { name: /show password|hide password/i });
+  }
+
+  /**
+   * Picks an option in a react-aria combobox (Company Type, City, Verticals). The listbox only
+   * opens on real key presses and its items load from the server, so typing is retried until the
+   * option shows. City has 700+ entries, so it is filtered by typing first.
+   */
+  private async selectOption(combo: Locator, search: string, option: string | RegExp) {
+    const item = this.page.getByRole('option', { name: option, exact: typeof option === 'string' });
+    await combo.click();
+    await expect(async () => {
+      await combo.fill('');
+      if (search) await this.page.keyboard.type(search, { delay: 30 });
+      if ((await combo.getAttribute('aria-expanded')) !== 'true') await this.page.keyboard.press('ArrowDown');
+      await expect(item).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] });
+    await item.click();
+    await expect(combo).not.toHaveValue('');
+  }
+
+  async fill(data: ItCompanyData) {
+    await this.companyName.fill(data.companyName);
+    await this.selectOption(this.companyType, data.companyType, data.companyType);
+    await this.email.fill(data.email);
+    await this.phone.fill(data.phone);
+    await this.password.fill(data.password);
+    await this.confirmPassword.fill(data.confirmPassword);
+    await this.address.fill(data.address);
+    await this.selectOption(this.city, data.citySearch, data.cityOption);
+    await this.website.fill(data.website);
+    await this.selectOption(this.vertical, data.vertical, data.vertical);
+  }
+}

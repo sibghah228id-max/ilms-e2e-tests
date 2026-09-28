@@ -101,3 +101,43 @@ export const STUDENT_ACTIVATION_STEPS: ActivationStep[] = [
     required: false,
   },
 ];
+
+/**
+ * Steps shown to IT Companies, in display order. The company itself is verified through SECP
+ * (after the owner's PakID), and PSEB verification and Talent Hub consent stay optional.
+ */
+export const IT_COMPANY_ACTIVATION_STEPS: ActivationStep[] = [
+  {
+    title: 'Verify your identity with PakID',
+    description: 'Complete the one-time identity verification through NADRA.',
+    action: 'Verify with PakID',
+    required: true,
+  },
+  {
+    title: 'Verify your company with SECP',
+    description:
+      'The account owner or director must complete PakID verification before the company can be verified through SECP.',
+    action: 'Verify Company',
+    required: true,
+  },
+  {
+    title: 'Verify your company with PSEB (Optional)',
+    description: 'Connect and verify your company registration with PSEB.',
+    action: 'Verify with PSEB',
+    required: false,
+  },
+  {
+    title: 'Complete your profile',
+    description:
+      `Add the required information to bring your profile completion to at least ${PROFILE_COMPLETION_TARGET}%. ` +
+      'Your profile is currently {pct}% complete.',
+    action: 'Complete Profile',
+    required: true,
+  },
+  {
+    title: 'Give consent for Talent Hub (Optional)',
+    description: 'Allow your profile to be displayed in the Talent Hub directory.',
+    action: 'Give Consent',
+    required: false,
+  },
+];

@@ -60,6 +60,14 @@ export class AdminUsersPage {
     await this.page.waitForLoadState('load');
   }
 
+  /** Switches the list to IT Companies (stakeholder_type_id=4) and waits for the table. */
+  async selectItCompany() {
+    await this.page.getByRole('link', { name: 'IT Companies' }).click();
+    await expect(this.page).toHaveURL(/\/securecontroller\/users\?.*stakeholder_type_id=4/);
+    await expect(this.table).toBeVisible();
+    await this.page.waitForLoadState('load');
+  }
+
   /** Switches the list to IT Professionals (stakeholder_type_id=2) and waits for the table. */
   async selectItProfessional() {
     await this.itProfessionalsTab.click();
@@ -136,6 +144,59 @@ export class AdminUsersPage {
   /** Flash message shown at the top of the list after "Verify PakID" is saved for `email`. */
   verificationFlash(email: string): Locator {
     return this.page.getByText(`PakID verified for ${email}`);
+  }
+
+  /**
+   * Actions → "Verify PakID" for a user who registered without a CNIC (companies). The modal is
+   * left blank, which makes the panel attach a random CNIC; the flash reports the one assigned.
+   */
+  async verifyPakIdForUser(email: string) {
+    await this.openActionsForUser(email);
+    await this.userRow(email).getByRole('button', { name: 'Verify PakID' }).click();
+
+    await expect(this.cnicModal).toBeVisible();
+    await expect(this.cnicModal.getByRole('heading', { name: `Verify PakID for ${email}` })).toBeVisible();
+    await expect(this.cnicInput).toHaveValue('');
+
+    await this.cnicSaveButton.click();
+    await this.page.waitForLoadState('networkidle');
+    await expect(this.cnicModal).toBeHidden();
+    await expect(this.verificationFlash(email)).toContainText('CNIC on file:');
+  }
+
+  /**
+   * Actions → "Register SECP + FBR" for a company. The entry is a form whose submit asks for
+   * confirmation through a browser `confirm()` dialog ("Register SECP + FBR with random NTN + CUIN?"),
+   * so the dialog is accepted before the click; the list reloads with a flash message.
+   */
+  async registerSecpAndFbrForUser(email: string) {
+    await this.openActionsForUser(email);
+    this.page.once('dialog', (dialog) => dialog.accept());
+    await this.userRow(email).getByRole('button', { name: 'Register SECP + FBR' }).click();
+
+    await this.page.waitForLoadState('load');
+    await expect(this.page.getByText(`SECP + FBR verified for ${email}`)).toBeVisible();
+  }
+
+  /**
+   * A named pill ("PakID", "SECP", "FBR", "PSEB") in the "Verifications" column of the user's row.
+   * Its title reads "<name> not verified" until the verification is recorded.
+   */
+  async verificationPill(email: string, name: string): Promise<Locator> {
+    const headers = await this.page.getByRole('columnheader').allInnerTexts();
+    const column = headers.findIndex((h) => /verifications/i.test(h));
+    expect(column, `"Verifications" column in ${headers.join(' | ')}`).toBeGreaterThanOrEqual(0);
+
+    return this.userRow(email).getByRole('cell').nth(column).getByText(name, { exact: true });
+  }
+
+  /** The named verification pill no longer reads "not verified". */
+  async expectVerified(email: string, name: string) {
+    await expect(this.userRow(email)).toHaveCount(1);
+    const pill = await this.verificationPill(email, name);
+    await expect(pill).toBeVisible();
+    await expect(pill).toHaveAttribute('title', /verified/i);
+    await expect(pill).not.toHaveAttribute('title', /not verified/i);
   }
 
   /** The "Verifications" cell of the user's row shows PakID as verified. */
