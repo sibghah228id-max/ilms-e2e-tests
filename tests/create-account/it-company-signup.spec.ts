@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
+import path from 'path';
 import { RoleSelectionPage, ItCompanyRegistrationPage } from '../pages/create-account.page';
 import { OtpPage } from '../pages/otp.page';
 import { DashboardPage } from '../pages/dashboard.page';
-import { itCompanySignupData, uniqueItCompanyData } from '../data/it-company-data';
+import { ItCompanyProfilePage, IT_COMPANY_PROFILE_STEP_HEADINGS } from '../pages/it-company-profile.page';
+import { itCompanyProfileData, itCompanySignupData, uniqueItCompanyData } from '../data/it-company-data';
 import { IT_COMPANY_ACTIVATION_STEPS } from '../data/dashboard-onboarding';
 import { studentSignupData } from '../data/student-data';
 import { createInbox, fetchOtp } from '../helpers/mailtm';
@@ -16,6 +18,9 @@ const { form: formData } = itCompanySignupData;
 // The OTP mail has the same subject for every role.
 const { otp: otpData } = studentSignupData;
 
+/** Company logo uploaded on Company Information (same PNG fixture as the other roles). */
+const profileImagePath = path.resolve(__dirname, '../fixtures/profile-image.png');
+
 /**
  * Full IT Company signup: login → Sign Up → IT Company → Create Account → form → OTP (from a
  * mail.tm inbox) → dashboard with the profile activation checklist.
@@ -25,10 +30,10 @@ const { otp: otpData } = studentSignupData;
  * portal never sees a duplicate account. Each run leaves a real account behind on the portal.
  */
 test.describe('IT Company signup (end to end)', () => {
-  // Two real email round-trips plus the admin panel in a second tab, so give it room.
-  test.setTimeout(7 * 60_000);
+  // Two real email round-trips, the admin panel in a second tab and the six-step profile wizard.
+  test.setTimeout(10 * 60_000);
 
-  test('registers a new IT Company, gets PakID and SECP verified by the admin, and opens Complete Profile', async ({ page }) => {
+  test('registers a new IT Company, gets verified by the admin, and completes the company profile', async ({ page }) => {
     // A fresh disposable inbox per run; its address is the email the portal sends the OTP to.
     const inbox = await createInbox(`itco${Date.now()}${Math.floor(Math.random() * 1000)}`);
     const company = uniqueItCompanyData(inbox.address);
@@ -165,5 +170,35 @@ test.describe('IT Company signup (end to end)', () => {
     await dashboard.openCompleteProfile();
     await expect(page).toHaveURL(/\/profile\/?$/);
     await expect(page.getByRole('heading', { name: 'Company Information' })).toBeVisible({ timeout: 30_000 });
+
+    // Company profile wizard: complete only what registration and verification left empty.
+    const profile = new ItCompanyProfilePage(page);
+    await dashboard.tour.skipIfShown();
+
+    // Step 1: Company Information (registration values kept) plus the company logo.
+    await profile.completeMissingCompanyInfo(itCompanyProfileData.companyInfo, company);
+    await profile.ensureCompanyLogo(profileImagePath);
+    await profile.saveAndNext(IT_COMPANY_PROFILE_STEP_HEADINGS.contact);
+
+    // Step 2: Contact Information, primary and secondary contacts.
+    await profile.completeMissingContacts(itCompanyProfileData.contact, company);
+    await profile.saveAndNext(IT_COMPANY_PROFILE_STEP_HEADINGS.stakeholders);
+
+    // Step 3: Stakeholder Details, first stakeholder plus one added with "Add Stakeholder".
+    await profile.addStakeholders(itCompanyProfileData.stakeholders);
+    await profile.saveAndNext(IT_COMPANY_PROFILE_STEP_HEADINGS.benefits);
+
+    // Step 4: Benefits & Perks, every other available option in each category.
+    expect(await profile.selectAlternatingBenefits()).toBeGreaterThan(0);
+    await profile.saveAndNext(IT_COMPANY_PROFILE_STEP_HEADINGS.expertise);
+
+    // Step 5: Expertise & Languages with ratings out of 100.
+    await profile.completeExpertiseAndLanguages(itCompanyProfileData.expertise);
+    await profile.saveAndNext(IT_COMPANY_PROFILE_STEP_HEADINGS.projects);
+
+    // Step 6: Projects, one record, then the wizard's final Save and its confirmation.
+    await profile.addProject(itCompanyProfileData.project);
+    const savedPct = await profile.saveProfile();
+    test.info().annotations.push({ type: 'profile-completion', description: String(savedPct) });
   });
 });

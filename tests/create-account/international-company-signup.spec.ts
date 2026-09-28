@@ -30,7 +30,7 @@ const profileImagePath = path.resolve(__dirname, '../fixtures/profile-image.png'
  */
 test.describe('International Company signup (end to end)', () => {
   // Real email round-trip plus the three-step company profile wizard, so give it room.
-  test.setTimeout(6 * 60_000);
+  test.setTimeout(8 * 60_000);
 
   test('registers a new International Company, verifies the emailed OTP, and completes the company profile', async ({ page }) => {
     // A fresh disposable inbox per run; its address is the email the portal sends the OTP to.

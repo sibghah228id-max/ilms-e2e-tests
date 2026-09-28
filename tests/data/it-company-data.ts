@@ -1,4 +1,5 @@
 import type { ItCompanyData } from '../pages/create-account.page';
+import { isoDateMonthsAgo, type SkillRating } from './student-profile-data';
 
 /** Static IT Company signup fixtures (dropdown values as listed on staging). */
 export const itCompanySignupData = {
@@ -56,6 +57,55 @@ export function uniqueItCompanyData(email: string, overrides: Partial<ItCompanyD
     ...overrides,
   };
 }
+
+/**
+ * Values for the IT Company profile wizard (/profile). Only fields still empty after registration
+ * and admin verification are filled from here; dropdown values were read from the staging lists.
+ */
+export const itCompanyProfileData = {
+  companyInfo: {
+    /** Option in the "No. Of Employees" list (en dash, as rendered). */
+    employees: '11–50',
+    establishmentDate: isoDateMonthsAgo(48),
+    linkedin: 'https://linkedin.com/company/test-it-company',
+    officePhone: '3005551234',
+    description:
+      'Pakistani IT company delivering web, mobile and cloud solutions for local and international clients.',
+    /** "Human Resource" rows: area option and headcount. */
+    humanResource: { area: 'IT Professional', count: '25' },
+  },
+  contact: {
+    /** Primary contact email is the company's own (signup) email; the secondary gets its own. */
+    primary: { fullName: 'Ahmed Khan', designation: 'Chief Executive Officer (CEO)', phone: '3011234567' },
+    secondary: {
+      fullName: 'Fatima Noor',
+      designation: 'Chief Technology Officer (CTO)',
+      email: 'fatima.noor@example.com',
+      phone: '3041234567',
+    },
+  },
+  stakeholders: [
+    { fullName: 'Sara Ali', designation: 'Chief Technology Officer (CTO)', email: 'sara.ali@example.com', phone: '3021234567' },
+    { fullName: 'Bilal Ahmed', designation: 'Project Manager', email: 'bilal.ahmed@example.com', phone: '3031234567' },
+  ],
+  // One option per category; ratings are fixed so a failed run is reproducible.
+  expertise: {
+    core: { name: 'Communication', rating: 75 } as SkillRating,
+    secondary: { name: 'Leadership', rating: 65 } as SkillRating,
+    technical: { name: 'JavaScript', rating: 80 } as SkillRating,
+    tools: { name: 'GitHub', rating: 85 } as SkillRating,
+    language: { name: 'English', rating: 90 } as SkillRating,
+  },
+  project: {
+    name: 'Talent Portal Automation',
+    client: 'INDUS Test Client',
+    skillUsed: 'Software Development',
+    description: 'End-to-end automation of the talent portal onboarding and verification workflows.',
+    deliveryDate: isoDateMonthsAgo(3),
+  },
+};
+
+export type ItCompanyProfileData = typeof itCompanyProfileData;
 
 /** "0123456789" → "Abcdefghij", capitalised so it reads like a name. */
 function digitsToLetters(digits: string): string {

@@ -85,10 +85,15 @@ export class ProfilePage {
 
   /** Fills a text-like input only when it is still empty; existing values are left untouched. */
   async fillIfEmpty(locator: Locator, value: string) {
-    if (!(await locator.inputValue()).trim()) {
-      await locator.fill(value);
-    }
-    await expect(locator).not.toHaveValue('');
+    // A step can re-render once more shortly after it opens (its data is fetched again), which
+    // wipes a value typed in that window. Re-check once the network is quiet and refill if so.
+    await expect(async () => {
+      if (!(await locator.inputValue()).trim()) {
+        await locator.fill(value);
+      }
+      await this.page.waitForLoadState('networkidle');
+      await expect(locator).not.toHaveValue('', { timeout: 1_000 });
+    }).toPass({ timeout: 20_000, intervals: [500, 1_000] });
   }
 
   /**
@@ -212,7 +217,7 @@ export class ProfilePage {
    * step is still reloading after a save is discarded by the re-render, so the section is checked
    * again once the network is quiet and the click is repeated if it vanished.
    */
-  private async addRecordSection(buttonName: string, sectionHeading: string) {
+  protected async addRecordSection(buttonName: string, sectionHeading: string) {
     // Prefer the first matching heading: some roles reuse the same title for every record
     // (e.g. IT Professional education sections are all "Education Details").
     const section = this.main.getByRole('heading', { name: sectionHeading, exact: true }).first();
