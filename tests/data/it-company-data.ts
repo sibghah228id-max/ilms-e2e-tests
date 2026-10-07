@@ -24,7 +24,7 @@ export const itCompanySignupData = {
       phone: 'Enter your phone number',
       address: 'Enter your company address',
     },
-    phoneCountryLabel: 'PK | +92',
+    phoneCountryLabel: '+92',
   },
 };
 

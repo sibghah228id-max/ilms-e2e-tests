@@ -2,6 +2,15 @@ import { type Page, type Locator, expect } from '@playwright/test';
 
 export const ROLES = ['IT Student', 'IT Professional', 'IT Company', 'Academia', 'International Company'] as const;
 
+/**
+ * Dialing-code prefix rendered in the leading slot of a phone input. The widget differs per
+ * environment (a "PK | +92" country button on live, a searchable "Dialing code" combobox showing
+ * "+92" on staging), so target the slot itself and assert on the "+92" text it contains.
+ */
+export function phoneCountryOf(phone: Locator): Locator {
+  return phone.locator('xpath=ancestor::div[@data-input-size][1]').locator('section[data-leading="true"]');
+}
+
 /** Role-selection step: /create-account */
 export class RoleSelectionPage {
   readonly createAccountButton: Locator;
@@ -75,6 +84,8 @@ export class StudentRegistrationPage {
   readonly dateOfBirth: Locator;
   readonly genderGroup: Locator;
   readonly email: Locator;
+  /** Dialing-code prefix shown before the phone input (defaults to Pakistan, "+92"). */
+  readonly phoneCountry: Locator;
   readonly phone: Locator;
   readonly password: Locator;
   readonly confirmPassword: Locator;
@@ -88,6 +99,7 @@ export class StudentRegistrationPage {
     this.genderGroup = page.getByRole('radiogroup', { name: 'Gender' });
     this.email = page.locator('#email');
     this.phone = page.locator('#phone_e164');
+    this.phoneCountry = phoneCountryOf(this.phone);
     this.password = page.locator('#password');
     this.confirmPassword = page.locator('#confirmPassword');
     this.university = page.getByRole('combobox', { name: 'University' });
@@ -161,7 +173,7 @@ export class ItProfessionalRegistrationPage {
   readonly dateOfBirth: Locator;
   readonly genderGroup: Locator;
   readonly email: Locator;
-  /** Phone country-code selector (defaults to "PK | +92"). */
+  /** Dialing-code prefix shown before the phone input (defaults to Pakistan, "+92"). */
   readonly phoneCountry: Locator;
   readonly phone: Locator;
   readonly password: Locator;
@@ -176,10 +188,9 @@ export class ItProfessionalRegistrationPage {
     this.dateOfBirth = page.locator('#dateOfBirth');
     this.genderGroup = page.getByRole('radiogroup', { name: 'Gender' });
     this.email = page.locator('#email');
-    // Prefer the visible country button over getByText('PK | +92'), which also matches a <option>.
-    this.phoneCountry = page.getByRole('button', { name: /^PK \| \+92/ });
     // Professional form uses #phoneNumber (student form uses #phone_e164).
     this.phone = page.locator('#phoneNumber');
+    this.phoneCountry = phoneCountryOf(this.phone);
     this.password = page.locator('#password');
     this.confirmPassword = page.locator('#confirmPassword');
     this.yearsOfExperience = page.locator('#yearsExperience');
@@ -233,7 +244,7 @@ export class InternationalCompanyRegistrationPage {
   readonly companyName: Locator;
   readonly vertical: Locator;
   readonly email: Locator;
-  /** Phone country-code selector (defaults to "PK | +92"). */
+  /** Dialing-code prefix shown before the phone input (defaults to Pakistan, "+92"). */
   readonly phoneCountry: Locator;
   readonly phone: Locator;
   readonly password: Locator;
@@ -245,8 +256,8 @@ export class InternationalCompanyRegistrationPage {
     this.companyName = page.locator('#companyName');
     this.vertical = page.getByRole('combobox', { name: /^Verticals/ });
     this.email = page.locator('#companyEmail');
-    this.phoneCountry = page.getByRole('button', { name: /^PK \| \+92/ });
     this.phone = page.locator('#companyPhone');
+    this.phoneCountry = phoneCountryOf(this.phone);
     this.password = page.locator('#password');
     this.confirmPassword = page.locator('#confirmPassword');
     this.country = page.getByRole('combobox', { name: /^Country/ });
@@ -317,7 +328,7 @@ export class ItCompanyRegistrationPage {
   readonly companyName: Locator;
   readonly companyType: Locator;
   readonly email: Locator;
-  /** Phone country-code selector (defaults to "PK | +92"). */
+  /** Dialing-code prefix shown before the phone input (defaults to Pakistan, "+92"). */
   readonly phoneCountry: Locator;
   readonly phone: Locator;
   readonly password: Locator;
@@ -332,8 +343,8 @@ export class ItCompanyRegistrationPage {
     this.companyName = page.locator('#companyName');
     this.companyType = page.getByRole('combobox', { name: /^Company Type/ });
     this.email = page.locator('#email');
-    this.phoneCountry = page.getByRole('button', { name: /^PK \| \+92/ });
     this.phone = page.locator('#phoneNumber');
+    this.phoneCountry = phoneCountryOf(this.phone);
     this.password = page.locator('#password');
     this.confirmPassword = page.locator('#confirmPassword');
     this.address = page.locator('#address');

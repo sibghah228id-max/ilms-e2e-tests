@@ -1,6 +1,6 @@
 import { type Locator, expect } from '@playwright/test';
 import { ProfilePage } from './profile.page';
-import type { InternationalCompanyData } from './create-account.page';
+import { phoneCountryOf, type InternationalCompanyData } from './create-account.page';
 import type { InternationalCompanyProfileData } from '../data/international-company-data';
 
 /** Stepper entries of the company wizard (sidebar buttons, accessible names). */
@@ -89,7 +89,7 @@ export class CompanyProfilePage extends ProfilePage {
     await expect(this.byId('fullName')).not.toHaveValue('');
     await expect(this.byId('contactEmail')).toHaveValue(company.email);
     await expect(this.byId('phone')).toHaveValue(company.phone);
-    await expect(this.page.getByRole('button', { name: /^PK \| \+92/ })).toBeVisible();
+    await expect(phoneCountryOf(this.byId('phone'))).toContainText('+92');
 
     await this.pickComboIfEmpty(this.byId('designation'), '', data.designation);
   }

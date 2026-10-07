@@ -448,6 +448,10 @@ export class ProfilePage {
   /**
    * Dismisses sticky/sidebar "Profile Completion" strips that sit over the top of the form and
    * intercept clicks (common once completion climbs during the wizard).
+   *
+   * Best effort only: the strip animates in and out and is re-rendered as completion changes, so
+   * a click can land while the button has pointer events disabled (mid-transition) or after it has
+   * detached. Either means the strip is going away by itself, so a failed click is never fatal.
    */
   async dismissProfileCompletionOverlays() {
     const candidates = [
@@ -456,11 +460,18 @@ export class ProfilePage {
       this.page.getByRole('button', { name: 'Dismiss', exact: true }),
     ];
     for (const btn of candidates) {
-      if (await btn.first().isVisible().catch(() => false)) {
-        await btn.first().click();
-        await expect(btn.first()).toBeHidden({ timeout: 5_000 }).catch(() => undefined);
-        break;
+      const target = btn.first();
+      if (!(await target.isVisible().catch(() => false))) continue;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        // Short timeout: if the button is not clickable quickly, it is most likely mid-transition.
+        await target.click({ timeout: 2_000 }).catch(() => undefined);
+        if (await target.isHidden().catch(() => true)) break;
+        await this.page.waitForTimeout(500);
       }
+      // Give the strip its exit animation, but never fail the step over it.
+      await expect(target).toBeHidden({ timeout: 5_000 }).catch(() => undefined);
+      break;
     }
   }
 

@@ -58,8 +58,8 @@ test.describe('IT Student signup (end to end)', () => {
     await expect(form.cnic).toHaveAttribute('placeholder', formData.placeholders.cnic);
     await expect(form.email).toHaveAttribute('placeholder', formData.placeholders.email);
     await expect(form.phone).toHaveAttribute('placeholder', formData.placeholders.phone);
-    // The phone prefix is shown as plain "+92" text beside the Phone Number label (no country button).
-    await expect(page.getByText(formData.phoneCountryLabel, { exact: true })).toBeVisible();
+    // The phone prefix reads "+92" on staging and "PK | +92" on live; both contain the dialing code.
+    await expect(form.phoneCountry).toContainText(formData.phoneCountryLabel);
 
     await form.fill(student);
 

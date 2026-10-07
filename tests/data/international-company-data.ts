@@ -47,7 +47,7 @@ export const internationalCompanySignupData = {
       email: 'Enter your email address',
       phone: 'Enter your phone number',
     },
-    phoneCountryLabel: 'PK | +92',
+    phoneCountryLabel: '+92',
   },
 };
 
