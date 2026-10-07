@@ -292,9 +292,56 @@ export class DashboardPage {
     expect(await this.checklist.state(pakIdStep.title)).toBe('completed');
   }
 
-  /** "Complete Profile" inside the "Complete your profile" row; it is a link once PakID is verified. */
+  /**
+   * "Complete Profile" inside the "Complete your profile" row; it is a link once PakID is verified.
+   * Clicking it now opens the "Profile setup" dialog (outstanding mandatory fields + progress) instead
+   * of navigating directly; its "Continue profile" link is what leads to /profile.
+   */
   async openCompleteProfile() {
-    await this.checklist.item(profileStep.title).getByRole('link', { name: profileStep.action, exact: true }).click();
+    const completeProfileLink = this.page.getByRole('link', { name: /complete profile/i });
+    const completeProfileButton = this.page.getByRole('button', { name: /complete profile/i });
+
+    // Wait for either form of the control before counting, since count() does not auto-wait.
+    await expect(completeProfileLink.or(completeProfileButton).first()).toBeVisible({ timeout: 60_000 });
+
+    // TEMP DEBUG: report what the dashboard actually renders for "Complete Profile".
+    console.log('Complete Profile links:', await completeProfileLink.count());
+    console.log('Complete Profile buttons:', await completeProfileButton.count());
+    console.log('Complete Profile text:', await this.page.getByText('Complete Profile', { exact: true }).count());
+
+    let completeProfile: Locator;
+    if (await completeProfileLink.count()) {
+      completeProfile = completeProfileLink.first();
+    } else if (await completeProfileButton.count()) {
+      completeProfile = completeProfileButton.first();
+    } else {
+      throw new Error(
+        'Complete Profile control was not found on the dashboard. Check the current activation-step DOM/state.',
+      );
+    }
+
+    await expect(completeProfile).toBeVisible({ timeout: 60_000 });
+    await completeProfile.click();
+
+    const continueButton = this.page.getByRole('button', { name: /continue profile/i });
+    const continueLink = this.page.getByRole('link', { name: /continue profile/i });
+
+    // The popup renders after the click; wait for either form before counting.
+    await expect(continueButton.or(continueLink).first()).toBeVisible({ timeout: 60_000 });
+
+    let continueProfile: Locator;
+    if (await continueButton.count()) {
+      continueProfile = continueButton.first();
+    } else if (await continueLink.count()) {
+      continueProfile = continueLink.first();
+    } else {
+      continueProfile = this.page.getByText('Continue profile', { exact: true });
+    }
+
+    await expect(continueProfile).toBeVisible({ timeout: 60_000 });
+    await continueProfile.click();
+
+    await expect(this.page).toHaveURL(/\/profile\/?$/, { timeout: 60_000 });
   }
 }
 

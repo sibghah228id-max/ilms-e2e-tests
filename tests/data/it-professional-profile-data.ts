@@ -20,8 +20,8 @@ export const itProfessionalProfileData = {
     institutionSearch: 'Air',
     institution: 'Air University',
     campus: 'Air University Islamabad Campus',
-    department: 'Computer Science',
-    program: 'Computer Science · Bachelors',
+    /** Free-text input typed by the user (placeholder "e.g. BS Computer Science"). */
+    program: 'BS Computer Science',
     studentId: 'AU-PRO-2020-0001',
     // Professionals use End Year (Currently Studying defaults to No); semester is student-only.
     startYear: isoDateMonthsAgo(72).slice(0, 7),

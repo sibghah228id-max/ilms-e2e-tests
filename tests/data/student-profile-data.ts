@@ -38,11 +38,14 @@ export const studentProfileData = {
     institutionSearch: 'Air',
     institution: 'Air University',
     campus: 'Air University Islamabad Campus',
-    department: 'Computer Science',
-    program: 'Computer Science · Bachelors',
+    /** Free-text input typed by the user (placeholder "e.g. BS Computer Science"). */
+    program: 'BS Computer Science',
     studentId: 'AU-2024-0001',
     semester: '3rd Semester',
     startYear: isoMonthMonthsAgo(24),
+    // Final-year project fields; the form shows (and requires) them only for the 7th/8th semester.
+    fypName: 'Campus Placement Portal',
+    fypDetails: 'A web platform that matches final-year students with internship and job openings.',
   },
 
   // One option per category; ratings are fixed so a failed run is reproducible.

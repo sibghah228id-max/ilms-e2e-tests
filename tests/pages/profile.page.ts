@@ -334,12 +334,19 @@ export class ProfilePage {
    * present is kept, the rest of that same record is completed, and no second record is added.
    */
   async completeMissingEducationDetails(
-    data: Omit<StudentProfileData['education'], 'semester'> & { semester?: string; endYear?: string },
+    data: Omit<StudentProfileData['education'], 'semester' | 'fypName' | 'fypDetails'> & {
+      semester?: string;
+      endYear?: string;
+      /** Required only when the chosen semester is 7th or 8th (final year). */
+      fypName?: string;
+      fypDetails?: string;
+    },
   ) {
-    // The step fetches its option lists after it opens, and picking Campus, Department or Program
-    // reloads the dependent lists. A selection made before such a reload keeps its text but loses
-    // its key, so Degree Type is picked last, once the network is quiet, and everything is
-    // re-checked right before the caller saves.
+    // Fields: Degree Type, Institution, Campus and Semester are dropdowns; Program and Student ID
+    // are text inputs; Start Year is a month picker. The step fetches its option lists after it
+    // opens, and picking Campus reloads the dependent lists. A selection made before such a reload
+    // keeps its text but loses its key, so Degree Type is picked last, once the network is quiet,
+    // and everything is re-checked right before the caller saves.
     await this.page.waitForLoadState('networkidle');
 
     // Students get educations.0 from signup; IT Professionals show an empty step until added.
@@ -350,14 +357,32 @@ export class ProfilePage {
 
     await this.pickComboIfEmpty(this.byId('educations.0.institutionId'), data.institutionSearch, data.institution);
     await this.pickComboIfEmpty(this.byId('educations.0.campusId'), '', new RegExp(`^${escapeRegExp(data.campus)}`));
-    await this.pickComboIfEmpty(this.byId('educations.0.departmentId'), '', data.department);
-    await this.pickComboIfEmpty(this.byId('educations.0.department'), '', data.program);
+
+    // Program is a free-text input (placeholder "e.g. BS Computer Science") typed by the user.
+    const program = this.main.getByRole('textbox', { name: /^Program/ });
+    await this.fillIfEmpty(program, data.program);
+
     await this.fillIfEmpty(this.byId('educations.0.studentId'), data.studentId);
 
     // Semester is student-only; professionals use Subjects / End Year instead.
     const semester = this.byId('educations.0.semester');
     if ((await semester.count()) > 0 && data.semester) {
       await this.pickComboIfEmpty(semester, '', data.semester);
+    }
+
+    // Choosing the 7th or 8th semester reveals the final-year project fields, both required.
+    const fypName = this.main.getByRole('textbox', { name: /^FYP Name/ });
+    const fypDetails = this.main.getByRole('textbox', { name: /^FYP Details/ });
+    const finalYear = /^(7|8)(th)?\b/i.test(data.semester ?? '');
+    if (finalYear) {
+      await expect(fypName, 'FYP Name should appear for the 7th/8th semester').toBeVisible();
+      await expect(fypDetails, 'FYP Details should appear for the 7th/8th semester').toBeVisible();
+      expect(data.fypName, 'fypName is required in the test data for the 7th/8th semester').toBeTruthy();
+      expect(data.fypDetails, 'fypDetails is required in the test data for the 7th/8th semester').toBeTruthy();
+      await this.fillIfEmpty(fypName, data.fypName!);
+      await this.fillIfEmpty(fypDetails, data.fypDetails!);
+    } else {
+      await expect(fypName, 'FYP fields should stay hidden before the 7th semester').toHaveCount(0);
     }
 
     await this.fillIfEmpty(this.byId('educations.0.startYear'), data.startYear);
@@ -374,8 +399,6 @@ export class ProfilePage {
       'educations.0.degreeType',
       'educations.0.institutionId',
       'educations.0.campusId',
-      'educations.0.departmentId',
-      'educations.0.department',
       'educations.0.studentId',
       'educations.0.startYear',
     ];
@@ -384,6 +407,11 @@ export class ProfilePage {
 
     for (const id of requiredIds) {
       await expect(this.byId(id), `${id} should still hold its value before saving`).not.toHaveValue('');
+    }
+    await expect(program, 'Program should still hold its value before saving').not.toHaveValue('');
+    if (finalYear) {
+      await expect(fypName, 'FYP Name should still hold its value before saving').not.toHaveValue('');
+      await expect(fypDetails, 'FYP Details should still hold its value before saving').not.toHaveValue('');
     }
   }
 
