@@ -219,12 +219,16 @@ export class ProfilePage {
    */
   async saveAndNext(nextHeading: string) {
     await this.saveAndNextButton.click();
-    await expect(this.savedToast).toBeVisible({ timeout: 30_000 });
 
-    // A step that fails validation stays put and shows "… is required" messages; report those
-    // rather than a bare missing-heading timeout.
-    const next = this.heading(nextHeading);
+    // A step that fails validation stays put, shows no toast and renders "… is required" style
+    // messages; report those rather than a bare toast/heading timeout.
     const validationMessage = this.main.getByText(/is required|must (be|contain)/i);
+    await expect(this.savedToast.or(validationMessage).first()).toBeVisible({ timeout: 30_000 });
+    if (!(await this.savedToast.isVisible())) {
+      throw new Error(`"Save & Next" was rejected: ${(await validationMessage.allInnerTexts()).join('; ')}`);
+    }
+
+    const next = this.heading(nextHeading);
     await expect(next.or(validationMessage).first()).toBeVisible({ timeout: 30_000 });
     if (!(await next.isVisible())) {
       throw new Error(`"Save & Next" was rejected: ${(await validationMessage.allInnerTexts()).join('; ')}`);
@@ -318,8 +322,10 @@ export class ProfilePage {
 
     const cropDialog = this.page.getByRole('dialog', { name: 'Crop profile picture' });
     await expect(cropDialog).toBeVisible();
+    // The upload can take well over 10s on staging; the default 15s wait has timed out on it.
     const uploaded = this.page.waitForResponse(
       (r) => r.url().includes('/api/profile/avatar') && r.request().method() === 'POST',
+      { timeout: 60_000 },
     );
     await cropDialog.getByRole('button', { name: 'Crop & upload' }).click();
 
