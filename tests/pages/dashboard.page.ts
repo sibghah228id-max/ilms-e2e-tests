@@ -214,6 +214,24 @@ export class DashboardPage {
     await this.tour.skipIfShown(tourTimeout);
   }
 
+  /**
+   * Sidebar "My Jobs". The entry sits inside the collapsible "Jobs" group, so the group is opened
+   * first when the link is not already showing. Navigates to the link's own href, so no URL is
+   * assumed here.
+   */
+  async openMyJobs() {
+    const link = this.page.getByRole('link', { name: 'My Jobs', exact: true });
+    if (!(await link.isVisible())) {
+      await this.page.getByText('Jobs', { exact: true }).first().click();
+    }
+    await expect(link).toBeVisible({ timeout: 30_000 });
+
+    const href = (await link.getAttribute('href')) ?? '';
+    expect(href, '"My Jobs" should link somewhere').not.toBe('');
+    await link.click();
+    await expect(this.page).toHaveURL(new RegExp(`${href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/?$`), { timeout: 60_000 });
+  }
+
   /** Sidebar "Log Out"; the portal returns to the login page. */
   async logout() {
     await this.logoutLink.click();

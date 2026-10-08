@@ -29,6 +29,33 @@ export const internationalCompanyProfileData = {
 
 export type InternationalCompanyProfileData = typeof internationalCompanyProfileData;
 
+/**
+ * Fallback values for an ALREADY REGISTERED company account, where most of the profile is filled
+ * in already. Only a field the portal hands back empty is written from here, so these values show
+ * up solely in the gaps; the signup fixtures above are reused wherever they fit.
+ */
+export const registeredCompanyProfileData = {
+  information: {
+    ...internationalCompanyProfileData.information,
+    companyName: 'Test Intl Company Registered',
+    /**
+     * Country picked when the field is empty. An International Company is registered outside
+     * Pakistan, so never leave this blank: a blank value would take the list's first option,
+     * which is Pakistan. The option may render as "Australia AUS"; the leading name is matched.
+     */
+    country: 'Australia',
+  },
+  contact: {
+    ...internationalCompanyProfileData.contact,
+    fullName: 'Daniel Carter',
+    contactEmail: 'daniel.carter@test-intl-company.example.com',
+    /** National part only; the country code comes from the phone field's own selector. */
+    phone: '3001234567',
+  },
+};
+
+export type RegisteredCompanyProfileData = typeof registeredCompanyProfileData;
+
 /** Static International Company signup fixtures (dropdown values as listed on staging). */
 export const internationalCompanySignupData = {
   company: {
