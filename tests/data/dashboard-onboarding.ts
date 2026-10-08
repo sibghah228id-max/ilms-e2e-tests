@@ -40,7 +40,7 @@ export const WELCOME_PREVIEW = {
     {
       title: 'Connect with the ecosystem',
       description:
-        'Use Talent Hub and social features to discover people, organizations, groups, and support.',
+        'Use Talent Hub and social features to discover people, organizations, groups, and submit complains.',
       points: ['Build relevant connections', 'Reach support whenever you need help'],
     },
   ] as PreviewSlide[],

@@ -32,20 +32,22 @@ test.describe('Create account — header', () => {
     await expect(rolePage.logoLink).toBeVisible();
 
     // Resolved href — a missing "https://" would make it a relative path on the portal.
-    // The link is deliberately not clicked: it is a Next.js <Link> whose client-side href is "/",
-    // so after hydration a click is routed to the portal root and redirects to /login (app bug).
     const href = await rolePage.logoLink.evaluate((a: HTMLAnchorElement) => a.href);
     expect(href).toBe(`${websiteUrl}/`);
   });
 
-  test('clicking the INDUS Tech Connect logo redirects to the login page', async ({ page }) => {
-    // The logo is a Next.js <Link> whose client-side target is the portal root, which sends an
-    // unauthenticated user to /login. That in-app redirect is the expected behaviour here, even
-    // though the anchor's href attribute points at the INDUS website (checked above).
+  test('clicking the INDUS Tech Connect logo opens the INDUS website in a new tab', async ({ page }) => {
+    // The logo is a plain external link (target="_blank", rel="noopener noreferrer") since
+    // 2026-10; it used to be a Next.js <Link> that routed to the portal root and on to /login.
+    await expect(rolePage.logoLink).toHaveAttribute('target', '_blank');
+    const popupPromise = page.waitForEvent('popup');
     await rolePage.logoLink.click();
 
-    // Wait for the login form itself: the URL changes while the page still shows "Loading...".
-    await expectLoginPageRendered(page, portalLoginUrl);
+    const popup = await popupPromise;
+    await expect(popup).toHaveURL(new RegExp(`^${escapeRegExp(websiteUrl)}/?`), { timeout: 30_000 });
+    await popup.close();
+    // The create-account page itself stays put.
+    await expect(page).toHaveURL(/\/create-account\/?$/);
   });
 
   test('home icon is shown and links to the portal login page', async ({ page }) => {

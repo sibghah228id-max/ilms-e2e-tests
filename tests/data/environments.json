@@ -12,7 +12,8 @@
       "fixedOtp": "787692"
     },
     "website": {
-      "baseUrl": "https://staging.industechconnect.pk"
+      "baseUrl": "https://industechconnect.pk",
+      "note": "The staging portal links its logo and Contact Us to the production INDUS website (verified 2026-10-08)."
     }
   },
   "live": {
