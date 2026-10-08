@@ -45,6 +45,8 @@ export class ProfilePage {
   readonly saveAndNextButton: Locator;
   readonly saveButton: Locator;
   readonly savedToast: Locator;
+  /** Wall-clock time of the last Next.js refetch of /profile seen on this page (0 = none yet). */
+  private lastProfileRefetchAt = 0;
 
   constructor(protected readonly page: Page) {
     this.main = page.locator('main');
@@ -52,6 +54,26 @@ export class ProfilePage {
     this.saveButton = page.getByRole('button', { name: 'Save', exact: true });
     // Several saves in one run can leave stacked Toastify alerts with the same copy; assert the newest.
     this.savedToast = page.getByRole('alert').filter({ hasText: 'Data saved successfully!' }).last();
+    page.on('request', (request) => {
+      if (/\/profile\?_rsc=/.test(request.url())) this.lastProfileRefetchAt = Date.now();
+    });
+  }
+
+  /**
+   * Waits until the portal has stopped re-fetching the profile. After a save the app calls the
+   * Next.js router refresh several times over the following seconds (observed ~1s, ~4s and
+   * ~6-11s after "Save & Next"); each refetch of `/profile?_rsc=…` re-renders the step from the
+   * saved data and discards any record added in the meantime. So editing waits until no such
+   * refetch has started for `quiet` ms, giving up (but not failing) after `timeout` ms.
+   */
+  async waitForProfileRefetchesToSettle({ quiet = 5_500, timeout = 20_000 } = {}) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      await this.page.waitForLoadState('networkidle');
+      const sinceLast = Date.now() - this.lastProfileRefetchAt;
+      if (sinceLast >= quiet) return;
+      await this.page.waitForTimeout(Math.min(quiet - sinceLast, deadline - Date.now()));
+    }
   }
 
   async expectVisible() {
@@ -208,16 +230,19 @@ export class ProfilePage {
       throw new Error(`"Save & Next" was rejected: ${(await validationMessage.allInnerTexts()).join('; ')}`);
     }
     await expect(next).toBeVisible();
-    // The saved profile is fetched again right after the switch; let that settle before editing.
-    await this.page.waitForLoadState('networkidle');
+    // The saved profile is fetched again several times after the switch; let that settle before
+    // editing, otherwise a record added now is wiped by the next re-render.
+    await this.waitForProfileRefetchesToSettle();
   }
 
   /**
    * Clicks an "Add …" button and waits for its inline section heading. A section added while the
-   * step is still reloading after a save is discarded by the re-render, so the section is checked
-   * again once the network is quiet and the click is repeated if it vanished.
+   * step is still reloading after a save is discarded by the re-render, so the refetch burst is
+   * waited out first, and the section is checked again once the network is quiet and the click
+   * is repeated if it vanished.
    */
   protected async addRecordSection(buttonName: string, sectionHeading: string) {
+    await this.waitForProfileRefetchesToSettle();
     // Prefer the first matching heading: some roles reuse the same title for every record
     // (e.g. IT Professional education sections are all "Education Details").
     const section = this.main.getByRole('heading', { name: sectionHeading, exact: true }).first();
