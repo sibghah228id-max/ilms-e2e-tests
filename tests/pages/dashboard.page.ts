@@ -220,14 +220,30 @@ export class DashboardPage {
    * assumed here.
    */
   async openMyJobs() {
-    const link = this.page.getByRole('link', { name: 'My Jobs', exact: true });
+    await this.openSidebarLink('My Jobs', 'Jobs');
+  }
+
+  /**
+   * Sidebar "My Projects". Sits in the same "Opportunities" group as "My Jobs"; the group name is
+   * used only as the fallback for a collapsed sidebar.
+   */
+  async openMyProjects() {
+    await this.openSidebarLink('My Projects', 'Projects');
+  }
+
+  /**
+   * Follows a sidebar entry to its own href. A collapsible group is opened first when the link is
+   * not already showing, so no URL is assumed here and a renamed route is picked up from the page.
+   */
+  private async openSidebarLink(linkName: string, groupName: string) {
+    const link = this.page.getByRole('link', { name: linkName, exact: true });
     if (!(await link.isVisible())) {
-      await this.page.getByText('Jobs', { exact: true }).first().click();
+      await this.page.getByText(groupName, { exact: true }).first().click();
     }
     await expect(link).toBeVisible({ timeout: 30_000 });
 
     const href = (await link.getAttribute('href')) ?? '';
-    expect(href, '"My Jobs" should link somewhere').not.toBe('');
+    expect(href, `"${linkName}" should link somewhere`).not.toBe('');
     await link.click();
     await expect(this.page).toHaveURL(new RegExp(`${href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/?$`), { timeout: 60_000 });
   }

@@ -1,4 +1,5 @@
 import { type Page, type Locator, expect } from '@playwright/test';
+import { ReactAriaPage, escapeRegExp } from './react-aria.page';
 import type { SkillRating, StudentProfileData } from '../data/student-profile-data';
 
 /** Stepper entries (sidebar buttons, accessible names without the number/status). */
@@ -40,16 +41,15 @@ export const PROFESSIONAL_PROFILE_STEP_HEADINGS = {
  * experience, certificates, achievements, publications) are inline sections added with an
  * "Add …" button; their inputs carry stable ids such as `experiences.0.title`.
  */
-export class ProfilePage {
-  readonly main: Locator;
+export class ProfilePage extends ReactAriaPage {
   readonly saveAndNextButton: Locator;
   readonly saveButton: Locator;
   readonly savedToast: Locator;
   /** Wall-clock time of the last Next.js refetch of /profile seen on this page (0 = none yet). */
   private lastProfileRefetchAt = 0;
 
-  constructor(protected readonly page: Page) {
-    this.main = page.locator('main');
+  constructor(page: Page) {
+    super(page);
     this.saveAndNextButton = page.getByRole('button', { name: 'Save & Next', exact: true });
     this.saveButton = page.getByRole('button', { name: 'Save', exact: true });
     // Several saves in one run can leave stacked Toastify alerts with the same copy; assert the newest.
@@ -98,119 +98,6 @@ export class ProfilePage {
 
   async openPersonalDetails() {
     await this.openStep('personal');
-  }
-
-  /** Input with id `id` (ids of repeatable records contain dots, so an attribute selector is used). */
-  protected byId(id: string): Locator {
-    return this.page.locator(`[id="${id}"]`);
-  }
-
-  /** Fills a text-like input only when it is still empty; existing values are left untouched. */
-  async fillIfEmpty(locator: Locator, value: string) {
-    // A step can re-render once more shortly after it opens (its data is fetched again), which
-    // wipes a value typed in that window. Re-check once the network is quiet and refill if so.
-    await expect(async () => {
-      if (!(await locator.inputValue()).trim()) {
-        await locator.fill(value);
-      }
-      await this.page.waitForLoadState('networkidle');
-      await expect(locator).not.toHaveValue('', { timeout: 1_000 });
-    }).toPass({ timeout: 20_000, intervals: [500, 1_000] });
-  }
-
-  /**
-   * Picks an option in a react-aria combobox. The listbox opens only on real key presses, so the
-   * search text is typed; `optionName` selects a specific option, otherwise the first match wins.
-   * Multi-select comboboxes keep their popover open after a pick, so it is closed explicitly.
-   */
-  async pickComboOption(combo: Locator, search: string, optionName?: string | RegExp, { multi = false } = {}) {
-    // A string name must match exactly ("Communication" is also part of "Microwave Communication").
-    const option = optionName
-      ? this.page.getByRole('option', { name: optionName, exact: typeof optionName === 'string' })
-      : this.page.getByRole('option').first();
-    const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
-
-    // The list re-renders while the search text filters it, so a click can land on an option that
-    // is being replaced and commit nothing (the typed text then looks like a value until the form
-    // validates). Repeat the whole pick until the combobox reports the chosen option as its value.
-    await expect(async () => {
-      await combo.click();
-      if (search) {
-        await combo.fill('');
-        await this.page.keyboard.type(search, { delay: 30 });
-      }
-      if ((await combo.getAttribute('aria-expanded')) !== 'true') await this.page.keyboard.press('ArrowDown');
-      await expect(option).toBeVisible({ timeout: 3_000 });
-
-      const chosen = normalize(await option.innerText());
-      await option.click();
-      if (!multi) {
-        await expect
-          .poll(async () => normalize(await combo.inputValue()), { timeout: 3_000 })
-          .toBe(chosen);
-        // Option lists load lazily; a pick made against a list that is still loading is dropped
-        // when the data arrives. Re-check once the network has settled so such a revert retries.
-        await this.page.waitForLoadState('networkidle');
-        await expect
-          .poll(async () => normalize(await combo.inputValue()), { timeout: 2_000 })
-          .toBe(chosen);
-      }
-    }).toPass({ timeout: 45_000, intervals: [500, 1_000, 2_000] });
-
-    // Single-select comboboxes close on their own after a pick, and Escape while they are still
-    // open would revert the selection. Multi-select ones stay open, so only those get Escape.
-    const listbox = this.page.getByRole('listbox');
-    const stillOpen = await listbox.waitFor({ state: 'hidden', timeout: 2_000 }).then(() => false, () => true);
-    if (stillOpen) await this.page.keyboard.press('Escape');
-    await expect(listbox).toHaveCount(0);
-  }
-
-  /** Single-value combobox: picks an option only when nothing is selected yet. */
-  async pickComboIfEmpty(combo: Locator, search: string, optionName?: string | RegExp) {
-    if (!(await combo.inputValue()).trim()) {
-      await this.pickComboOption(combo, search, optionName);
-    }
-    await expect(combo).not.toHaveValue('');
-  }
-
-  /** Multi-select combobox: adds `optionName` as a tag unless that tag is already present. */
-  async addTag(combo: Locator, optionName: string) {
-    const tag = combo.locator('xpath=ancestor::*[@role="group"][1]').getByText(optionName, { exact: true });
-    if (await tag.count()) return;
-    await this.pickComboOption(combo, optionName, optionName, { multi: true });
-    // Typed search text stays in the input after a multi-select pick; clear it for the next one.
-    if (await combo.inputValue()) await combo.fill('');
-    await expect(tag).toBeVisible();
-  }
-
-  /** Types into a rich-text editor only when it has no content yet. */
-  async fillEditorIfEmpty(editor: Locator, text: string) {
-    if (!(await editor.innerText()).trim()) {
-      await editor.click();
-      await this.page.keyboard.type(text);
-    }
-    await expect(editor).toContainText(text.slice(0, 40));
-  }
-
-  /**
-   * Moves a react-aria range slider to `target` with the keyboard (PageUp/PageDown for big steps,
-   * arrows for single steps), driven by the value the slider actually reports after each key.
-   */
-  async setSlider(slider: Locator, target: number) {
-    expect(target, 'slider rating must be within 1–100').toBeGreaterThanOrEqual(1);
-    expect(target).toBeLessThanOrEqual(100);
-
-    await slider.focus();
-    let current = Number(await slider.inputValue());
-    for (let guard = 0; current !== target && guard < 200; guard++) {
-      const diff = target - current;
-      const key = Math.abs(diff) >= 10 ? (diff > 0 ? 'PageUp' : 'PageDown') : diff > 0 ? 'ArrowRight' : 'ArrowLeft';
-      await slider.press(key);
-      const next = Number(await slider.inputValue());
-      if (next === current) throw new Error(`Slider did not move on ${key} (stuck at ${current}, target ${target})`);
-      current = next;
-    }
-    await expect(slider).toHaveValue(String(target));
   }
 
   /**
@@ -567,8 +454,4 @@ export class ProfilePage {
     await this.byId('publications.0.publishDate').fill(data.publishDate);
     await this.byId('publications.0.linkOrDoi').fill(data.link);
   }
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

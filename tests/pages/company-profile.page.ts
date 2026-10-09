@@ -1,5 +1,6 @@
 import { type Locator, expect, test } from '@playwright/test';
 import { ProfilePage } from './profile.page';
+import { escapeRegExp } from './react-aria.page';
 import { phoneCountryOf, type InternationalCompanyData } from './create-account.page';
 import type {
   InternationalCompanyProfileData,
@@ -121,27 +122,6 @@ export class CompanyProfilePage extends ProfilePage {
   // ---- Registered account: complete only what the portal left empty -------------------------
 
   /**
-   * Option names a combobox offers right now. The list opens on a key press and loads lazily, so
-   * the first option is awaited; placeholders ("Select …", "No results") are dropped. The list is
-   * closed again without picking anything, so calling this changes nothing.
-   */
-  async optionNames(combo: Locator): Promise<string[]> {
-    await combo.click();
-    if ((await combo.getAttribute('aria-expanded')) !== 'true') await this.page.keyboard.press('ArrowDown');
-    const listbox = this.page.getByRole('listbox');
-    await expect(listbox).toBeVisible({ timeout: 15_000 });
-    await expect(this.page.getByRole('option').first()).toBeVisible({ timeout: 15_000 });
-
-    const names = (await this.page.getByRole('option').allInnerTexts())
-      .map((s) => s.replace(/\s+/g, ' ').trim())
-      .filter((s) => s && !/^(select|choose|no options|no results)/i.test(s));
-
-    await this.page.keyboard.press('Escape');
-    await expect(listbox).toHaveCount(0);
-    return [...new Set(names)];
-  }
-
-  /**
    * A locked field normally holds what registration stored. When the portal locks one that is
    * still empty (seen for the registered International Company account, whose Email is locked
    * with no value), the test cannot complete it: the gap is recorded with the run and left to the
@@ -260,6 +240,20 @@ export class CompanyProfilePage extends ProfilePage {
   }
 
   /**
+   * The country this company is registered in, as the locked Country field of step 1 shows it:
+   * the country name followed by its ISO-3166 alpha-3 code, e.g. "Australia AUS".
+   *
+   * The job wizard filters its City list by this country, so a test that posts a job reads the
+   * country here and hands it to PostJobPage rather than hard-coding one.
+   */
+  async companyCountry(): Promise<string> {
+    const country = this.byId('country');
+    await expect(country, 'the company profile should show a Country field').toHaveCount(1);
+    await expect(country, 'the company profile should hold a country').not.toHaveValue('');
+    return (await country.inputValue()).trim();
+  }
+
+  /**
    * Step 2 for a registered account: Full Name, Designation, Contact Email and Phone Number are
    * completed only where the portal left them empty.
    */
@@ -350,8 +344,4 @@ export class CompanyProfilePage extends ProfilePage {
     await expect(dialog).toBeHidden();
     return match ? Number(match[1]) : -1;
   }
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
