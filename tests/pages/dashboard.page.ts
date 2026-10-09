@@ -231,6 +231,16 @@ export class DashboardPage {
     await this.openSidebarLink('My Projects', 'Projects');
   }
 
+  /** Sidebar "Social Wall"; the entry sits in the "Socialize" group. */
+  async openSocialWall() {
+    await this.openSidebarLink('Social Wall', 'Socialize');
+  }
+
+  /** Sidebar "My Groups"; the entry sits in the "Socialize" group. */
+  async openMyGroups() {
+    await this.openSidebarLink('My Groups', 'Socialize');
+  }
+
   /**
    * Follows a sidebar entry to its own href. A collapsible group is opened first when the link is
    * not already showing, so no URL is assumed here and a renamed route is picked up from the page.

@@ -6,6 +6,8 @@ import {
   registeredCompanyProfileData,
   uniqueJobTitle,
   uniqueProjectTitle,
+  uniqueSocialPostText,
+  uniqueGroupFeedText,
 } from '../data/international-company-data';
 import { StudentLoginPage } from '../pages/login.page';
 import { DashboardPage } from '../pages/dashboard.page';
@@ -13,6 +15,8 @@ import { CompanyProfilePage, COMPANY_PROFILE_STEP_HEADINGS } from '../pages/comp
 import { MyJobsPage } from '../pages/jobs.page';
 import { publishJob } from '../helpers/post-job';
 import { publishProject } from '../helpers/post-project';
+import { publishSocialPost } from '../helpers/post-social-update';
+import { publishGroupFeed } from '../helpers/post-group-feed';
 
 // Email, password and OTP come from tests/data/international-company.json only; change them there.
 const { internationalCompany: user } = credentials;
@@ -38,16 +42,24 @@ const profileImagePath = path.resolve(__dirname, '../fixtures/profile-image.png'
  * It then does the same for a project: My Projects from the sidebar through the "Create Project"
  * wizard, published with a single click and checked to exist exactly once afterwards.
  *
- * NOTE: this test publishes. Each run adds two live job posts and one project to the account,
- * under titles that are unique per run (see uniqueJobTitle / uniqueProjectTitle), which is also
- * how the run finds them again.
+ * Then the Social Wall: two posts, each with text, an emoji and one attachment (a photo and a
+ * document), published with a single click and found exactly once under My Posts.
+ *
+ * Last come the groups: My Groups from the sidebar, the first group opened, its Discussions and
+ * Attachments counts read, one feed posted with a document, and the counts checked to have moved
+ * by exactly one.
+ *
+ * NOTE: this test publishes. Each run adds two live job posts, one project, two social posts and
+ * one group feed to the account, under titles that are unique per run (see uniqueJobTitle /
+ * uniqueProjectTitle / uniqueSocialPostText / uniqueGroupFeedText), which is also how the run
+ * finds them again.
  */
 test.describe('International Company login (registered account)', () => {
   // Login, the OTP round-trip, the guide, the full profile wizard and the whole job wizard on a
   // slow portal.
   test.setTimeout(20 * 60_000);
 
-  test('logs in, completes the missing profile data, publishes two jobs and a project', async ({ page }) => {
+  test('logs in, completes the missing profile data, publishes two jobs, a project, social posts and a group feed', async ({ page }) => {
     // Login form is shared by every role, so the existing page object handles it, OTP included.
     const login = new StudentLoginPage(page);
     await login.goto();
@@ -154,5 +166,29 @@ test.describe('International Company login (registered account)', () => {
     const projectTitle = uniqueProjectTitle();
     test.info().annotations.push({ type: 'project-title', description: projectTitle });
     await publishProject(page, projectTitle);
+
+    // Social Wall from the sidebar: the composer takes the text and an emoji from the picker,
+    // "Post" is clicked once, and the post is then counted under My Posts.
+    //
+    // Two posts, because the composer holds ONE attachment: a document silently replaces a photo
+    // already attached and the other way round, so Photo and Document get a post each.
+    await dashboard.openSocialWall();
+
+    const photoPostText = uniqueSocialPostText();
+    test.info().annotations.push({ type: 'social-post-text', description: `${photoPostText} (photo)` });
+    await publishSocialPost(page, { text: photoPostText, attachment: 'photo' });
+
+    const documentPostText = uniqueSocialPostText();
+    expect(documentPostText, 'the second post must use a different text').not.toBe(photoPostText);
+    test.info().annotations.push({ type: 'social-post-text', description: `${documentPostText} (document)` });
+    await publishSocialPost(page, { text: documentPostText, attachment: 'document' });
+
+    // My Groups from the sidebar: the first listed group is opened, its Discussions and
+    // Attachments counts are read, one feed with a document is posted with a single click, and
+    // the counts are then checked to have moved by exactly one.
+    await dashboard.openMyGroups();
+    const groupFeedText = uniqueGroupFeedText();
+    test.info().annotations.push({ type: 'group-feed-text', description: groupFeedText });
+    await publishGroupFeed(page, { text: groupFeedText, attachment: 'document' });
   });
 });

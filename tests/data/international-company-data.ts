@@ -165,6 +165,53 @@ export function uniqueProjectTitle(): string {
 }
 
 /**
+ * The Social Wall composer (/social-wall) for the registered company account.
+ *
+ * The photo and the document name files in tests/fixtures, so no absolute path is hard-coded; the
+ * document types the portal takes are .pdf, .doc(x), .ppt(x), .xls(x), .txt and .csv.
+ */
+export const registeredCompanySocialPostData = {
+  text: 'Playwright social wall check',
+  /** Emoji picked through the picker's own search box: what to search for, and what to click. */
+  emoji: { search: 'rocket', char: '\u{1F680}' },
+  photo: 'profile-image.png',
+  document: 'sample-document.pdf',
+};
+
+export type RegisteredCompanySocialPostData = typeof registeredCompanySocialPostData;
+
+/**
+ * Post text that is unique per run, so the published post can be found again - and counted -
+ * under My Posts without older runs' posts matching too.
+ */
+export function uniqueSocialPostText(): string {
+  return `${registeredCompanySocialPostData.text} ${digitsToLetters(runStamp())}`;
+}
+
+/**
+ * The feed composer inside a group (/groups/<id>) for the registered company account.
+ *
+ * It is the same composer the Social Wall uses, so the emoji and the fixtures are the same; the
+ * group the feed is posted in is whichever one My Groups lists first.
+ */
+export const registeredCompanyGroupFeedData = {
+  text: 'Playwright group feed check',
+  emoji: registeredCompanySocialPostData.emoji,
+  photo: registeredCompanySocialPostData.photo,
+  document: registeredCompanySocialPostData.document,
+};
+
+export type RegisteredCompanyGroupFeedData = typeof registeredCompanyGroupFeedData;
+
+/**
+ * Feed text that is unique per run, so the published feed can be found again - and counted - in
+ * the group without older runs' feeds matching too.
+ */
+export function uniqueGroupFeedText(): string {
+  return `${registeredCompanyGroupFeedData.text} ${digitsToLetters(runStamp())}`;
+}
+
+/**
  * A job title that is unique per run, so the published job can be found again in the jobs list
  * without older runs' jobs matching too.
  *
