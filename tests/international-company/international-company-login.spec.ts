@@ -8,6 +8,7 @@ import {
   uniqueProjectTitle,
   uniqueSocialPostText,
   uniqueGroupFeedText,
+  uniqueChatMessageText,
 } from '../data/international-company-data';
 import { StudentLoginPage } from '../pages/login.page';
 import { DashboardPage } from '../pages/dashboard.page';
@@ -17,6 +18,7 @@ import { publishJob } from '../helpers/post-job';
 import { publishProject } from '../helpers/post-project';
 import { publishSocialPost } from '../helpers/post-social-update';
 import { publishGroupFeed } from '../helpers/post-group-feed';
+import { sendChatMessages } from '../helpers/send-chat-messages';
 
 // Email, password and OTP come from tests/data/international-company.json only; change them there.
 const { internationalCompany: user } = credentials;
@@ -45,21 +47,25 @@ const profileImagePath = path.resolve(__dirname, '../fixtures/profile-image.png'
  * Then the Social Wall: two posts, each with text, an emoji and one attachment (a photo and a
  * document), published with a single click and found exactly once under My Posts.
  *
- * Last come the groups: My Groups from the sidebar, the first group opened, its Discussions and
+ * Then the groups: My Groups from the sidebar, the first group opened, its Discussions and
  * Attachments counts read, one feed posted with a document, and the counts checked to have moved
  * by exactly one.
  *
- * NOTE: this test publishes. Each run adds two live job posts, one project, two social posts and
- * one group feed to the account, under titles that are unique per run (see uniqueJobTitle /
- * uniqueProjectTitle / uniqueSocialPostText / uniqueGroupFeedText), which is also how the run
- * finds them again.
+ * Last comes messaging: Connections from the sidebar, a listed person's "Message" button, the
+ * chat header checked against that person's name, and three messages sent one click each - text
+ * with an emoji, an image and a document - each checked to have arrived before the next.
+ *
+ * NOTE: this test publishes. Each run adds two live job posts, one project, two social posts,
+ * one group feed and three chat messages to the account, under titles that are unique per run
+ * (see uniqueJobTitle / uniqueProjectTitle / uniqueSocialPostText / uniqueGroupFeedText /
+ * uniqueChatMessageText), which is also how the run finds them again.
  */
 test.describe('International Company login (registered account)', () => {
   // Login, the OTP round-trip, the guide, the full profile wizard and the whole job wizard on a
   // slow portal.
   test.setTimeout(20 * 60_000);
 
-  test('logs in, completes the missing profile data, publishes two jobs, a project, social posts and a group feed', async ({ page }) => {
+  test('logs in, completes the missing profile data, publishes jobs, a project, posts, a group feed and chat messages', async ({ page }) => {
     // Login form is shared by every role, so the existing page object handles it, OTP included.
     const login = new StudentLoginPage(page);
     await login.goto();
@@ -190,5 +196,13 @@ test.describe('International Company login (registered account)', () => {
     const groupFeedText = uniqueGroupFeedText();
     test.info().annotations.push({ type: 'group-feed-text', description: groupFeedText });
     await publishGroupFeed(page, { text: groupFeedText, attachment: 'document' });
+
+    // Connections from the sidebar: a listed person is messaged through their own "Message"
+    // button, the chat header is checked to be that person, and three messages go out with one
+    // click each. No video message: the API refuses video outright (see the helper).
+    await dashboard.openConnections();
+    const chatText = uniqueChatMessageText();
+    test.info().annotations.push({ type: 'chat-message-text', description: chatText });
+    await sendChatMessages(page, chatText);
   });
 });
