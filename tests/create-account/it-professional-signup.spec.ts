@@ -8,6 +8,8 @@ import {
   uniqueItProfessionalData,
 } from '../data/it-professional-data';
 import { createInbox, fetchOtp } from '../helpers/mailtm';
+import { expectPasswordRejected } from '../helpers/password-validation';
+import { INVALID_PASSWORD_CASES, VALID_PASSWORD } from '../data/password-policy';
 import { env, currentEnvName } from '../data/environments';
 import { AdminLoginPage } from '../pages/admin-login.page';
 import { AdminOtpPage } from '../pages/admin-otp.page';
@@ -71,6 +73,12 @@ test.describe('IT Professional signup (end to end)', () => {
     await expect(form.phoneCountry).toContainText(formData.phoneCountryLabel);
 
     await form.fill(professional);
+
+    // Password policy (tests/data/password-policy.ts): at least 10 characters with an uppercase
+    // and a lowercase letter. The form takes the valid password and the OTP step follows the submit;
+    // the rejected variants are covered by the "password validation" tests below.
+    await expect(form.password).toHaveValue(VALID_PASSWORD);
+    await expect(form.confirmPassword).toHaveValue(VALID_PASSWORD);
 
     // Password is masked by default and the eye button reveals it.
     await expect(form.password).toHaveAttribute('type', 'password');
@@ -236,4 +244,27 @@ test.describe('IT Professional signup (end to end)', () => {
     const cvPage = await digitalCv.openFullCv();
     await expect(cvPage.getByRole('heading', { name: new RegExp(`^${professional.name}$`, 'i') })).toBeVisible();
   });
+});
+
+test.describe('IT Professional signup — password validation', () => {
+  // The whole form is filled first (comboboxes load their options from the server).
+  test.setTimeout(3 * 60_000);
+
+  for (const invalid of INVALID_PASSWORD_CASES) {
+    test(`rejects a password ${invalid.title}`, async ({ page }) => {
+      const form = new ItProfessionalRegistrationPage(page);
+      await form.goto();
+      await form.expectVisible();
+
+      // Every other field is valid, so only the password rule can stop the signup. The email is a
+      // throwaway address: the form must not get as far as sending an OTP to it.
+      const professional = uniqueItProfessionalData(`pwcheckpro${Date.now()}@example.com`, {
+        password: invalid.password,
+        confirmPassword: invalid.password,
+      });
+      await form.fill(professional);
+
+      await expectPasswordRejected(page, form, invalid);
+    });
+  }
 });

@@ -3,7 +3,6 @@
     "namePrefix": "Test Student",
     "dateOfBirth": "1999-09-12",
     "gender": "Female",
-    "password": "1234567890",
     "university": "Air University"
   },
   "form": {

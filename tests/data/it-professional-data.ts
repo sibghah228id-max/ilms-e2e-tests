@@ -1,5 +1,6 @@
 import type { ItProfessionalData } from '../pages/create-account.page';
 import signupData from './it-professional-signup.json';
+import { VALID_PASSWORD } from './password-policy';
 import { studentSignupData } from './student-data';
 
 /** Static IT Professional signup fixtures (defaults, form labels) from it-professional-signup.json. */
@@ -14,7 +15,8 @@ export const itProfessionalOtpData = studentSignupData.otp;
  * The portal rejects duplicate emails and CNICs, so the identity fields are never hard-coded:
  * the timestamp + a random tail seed the name, CNIC and phone, and the email is the address of
  * a throwaway inbox created per run (see helpers/mailtm.ts). Everything else (date of birth,
- * gender, password, years of experience, work status) comes from it-professional-signup.json.
+ * gender, years of experience, work status) comes from it-professional-signup.json; the
+ * password is the shared VALID_PASSWORD.
  */
 export function uniqueItProfessionalData(
   email: string,
@@ -42,8 +44,8 @@ export function uniqueItProfessionalData(
     gender: professional.gender as ItProfessionalData['gender'],
     email,
     phone,
-    password: professional.password,
-    confirmPassword: professional.password,
+    password: VALID_PASSWORD,
+    confirmPassword: VALID_PASSWORD,
     yearsOfExperience: professional.yearsOfExperience,
     workStatus: professional.workStatus as ItProfessionalData['workStatus'],
     ...overrides,

@@ -11,6 +11,8 @@ import {
 } from '../data/international-company-data';
 import { studentSignupData } from '../data/student-data';
 import { createInbox, fetchOtp } from '../helpers/mailtm';
+import { expectPasswordRejected } from '../helpers/password-validation';
+import { INVALID_PASSWORD_CASES, VALID_PASSWORD } from '../data/password-policy';
 import { env } from '../data/environments';
 
 const { form: formData } = internationalCompanySignupData;
@@ -57,6 +59,12 @@ test.describe('International Company signup (end to end)', () => {
     await expect(form.phoneCountry).toContainText(formData.phoneCountryLabel);
 
     await form.fill(company);
+
+    // Password policy (tests/data/password-policy.ts): at least 10 characters with an uppercase
+    // and a lowercase letter. The form takes the valid password and the OTP step follows the submit;
+    // the rejected variants are covered by the "password validation" tests below.
+    await expect(form.password).toHaveValue(VALID_PASSWORD);
+    await expect(form.confirmPassword).toHaveValue(VALID_PASSWORD);
 
     // Password fields are masked by default and the eye button reveals them.
     await expect(form.password).toHaveAttribute('type', 'password');
@@ -113,4 +121,27 @@ test.describe('International Company signup (end to end)', () => {
     const savedPct = await profile.saveProfile();
     test.info().annotations.push({ type: 'profile-completion', description: String(savedPct) });
   });
+});
+
+test.describe('International Company signup — password validation', () => {
+  // The whole form is filled first (comboboxes load their options from the server).
+  test.setTimeout(3 * 60_000);
+
+  for (const invalid of INVALID_PASSWORD_CASES) {
+    test(`rejects a password ${invalid.title}`, async ({ page }) => {
+      const form = new InternationalCompanyRegistrationPage(page);
+      await form.goto();
+      await form.expectVisible();
+
+      // Every other field is valid, so only the password rule can stop the signup. The email is a
+      // throwaway address: the form must not get as far as sending an OTP to it.
+      const company = uniqueInternationalCompanyData(`pwcheckintl${Date.now()}@example.com`, {
+        password: invalid.password,
+        confirmPassword: invalid.password,
+      });
+      await form.fill(company);
+
+      await expectPasswordRejected(page, form, invalid);
+    });
+  }
 });

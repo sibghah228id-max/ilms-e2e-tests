@@ -1,4 +1,5 @@
 import type { InternationalCompanyData } from '../pages/create-account.page';
+import { VALID_PASSWORD } from './password-policy';
 import { isoMonthMonthsAgo, type SkillRating } from './student-profile-data';
 
 /**
@@ -212,6 +213,30 @@ export function uniqueGroupFeedText(): string {
 }
 
 /**
+ * Messaging a connection from /connections, and the chat at /messages.
+ *
+ * The chat has a small emoji palette of its own rather than the picker the post composer uses,
+ * so the emoji here is one the palette offers. No video: the API refuses anything outside jpg,
+ * jpeg, png, gif, webp, pdf, doc, docx, xls and xlsx.
+ */
+export const registeredCompanyChatData = {
+  text: 'Playwright chat check',
+  emoji: '\u{1F600}',
+  image: 'profile-image.png',
+  document: 'sample-document.pdf',
+};
+
+export type RegisteredCompanyChatData = typeof registeredCompanyChatData;
+
+/**
+ * Message text that is unique per run, so the sent message can be found again in the thread
+ * without older runs' messages matching too.
+ */
+export function uniqueChatMessageText(): string {
+  return `${registeredCompanyChatData.text} ${digitsToLetters(runStamp())}`;
+}
+
+/**
  * A job title that is unique per run, so the published job can be found again in the jobs list
  * without older runs' jobs matching too.
  *
@@ -244,8 +269,8 @@ export const internationalCompanySignupData = {
     /** Typed into the "Country" combobox; the option is matched by `countryOption`. */
     countrySearch: 'United States',
     countryOption: /^United States/,
-    /** The portal requires at least 10 characters. */
-    password: 'Intl@Pass2026',
+    /** Shared across roles; the policy lives in password-policy.ts. */
+    password: VALID_PASSWORD,
   },
   form: {
     placeholders: {

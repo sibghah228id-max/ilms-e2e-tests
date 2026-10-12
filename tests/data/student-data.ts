@@ -1,5 +1,6 @@
 import type { StudentData } from '../pages/create-account.page';
 import signupData from './student-signup.json';
+import { VALID_PASSWORD } from './password-policy';
 
 /** Static signup fixtures (defaults, form labels, OTP mail subject) from student-signup.json. */
 export const studentSignupData = signupData;
@@ -10,7 +11,7 @@ export const studentSignupData = signupData;
  * The portal rejects duplicate emails and CNICs, so the identity fields are never hard-coded:
  * the timestamp + a random tail seed the name, CNIC and phone, and the email is the address of
  * a throwaway inbox created per run (see helpers/mailtm.ts). Everything else (date of birth,
- * gender, password, university) comes from student-signup.json.
+ * gender, university) comes from student-signup.json; the password is the shared VALID_PASSWORD.
  */
 export function uniqueStudentData(email: string, overrides: Partial<StudentData> = {}): StudentData {
   const { student } = studentSignupData;
@@ -33,8 +34,8 @@ export function uniqueStudentData(email: string, overrides: Partial<StudentData>
     gender: student.gender as StudentData['gender'],
     email,
     phone,
-    password: student.password,
-    confirmPassword: student.password,
+    password: VALID_PASSWORD,
+    confirmPassword: VALID_PASSWORD,
     university: student.university,
     ...overrides,
   };

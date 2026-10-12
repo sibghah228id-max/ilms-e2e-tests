@@ -1,5 +1,6 @@
 import type { ItCompanyData } from '../pages/create-account.page';
 import { isoDateMonthsAgo, type SkillRating } from './student-profile-data';
+import { VALID_PASSWORD } from './password-policy';
 
 /** Static IT Company signup fixtures (dropdown values as listed on staging). */
 export const itCompanySignupData = {
@@ -14,8 +15,8 @@ export const itCompanySignupData = {
     website: 'https://www.test-it-company.example.com',
     /** Option in the "Verticals" list. */
     vertical: 'Information Technology',
-    /** The portal requires at least 10 characters. */
-    password: 'ItCo@Pass2026',
+    /** Shared across roles; the policy lives in password-policy.ts. */
+    password: VALID_PASSWORD,
   },
   form: {
     placeholders: {
