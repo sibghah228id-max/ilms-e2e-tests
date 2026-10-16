@@ -135,8 +135,12 @@ export class ReactAriaPage {
     if (!(await editor.innerText()).trim()) {
       await editor.click();
       await this.page.keyboard.type(text);
+      await expect(editor).toContainText(text.slice(0, 40));
+      return;
     }
-    await expect(editor).toContainText(text.slice(0, 40));
+    // Existing content is kept as is: every account can hold its own description, so only check
+    // that the editor is not empty.
+    await expect(editor).not.toHaveText(/^\s*$/);
   }
 
   /**
