@@ -55,6 +55,8 @@ export type ActivationStep = {
   description: string;
   /** Text of the step's action button/link. */
   action: string;
+  /** Text of a link some deployments render at the end of the description paragraph (optional). */
+  trailingLink?: string;
   /** Required steps gate profile activation; optional ones can be done any time. */
   required: boolean;
 };
@@ -76,8 +78,9 @@ export const ACTIVATION_CHECKLIST = {
 export const STUDENT_ACTIVATION_STEPS: ActivationStep[] = [
   {
     title: 'Verify your identity with PakID',
-    // The description paragraph also holds the "View guide" link, so its text ends with it.
-    description: 'Complete the one-time identity verification through NADRA. View guide',
+    description: 'Complete the one-time identity verification through NADRA.',
+    // Some deployments append a "View guide" link inside the description paragraph.
+    trailingLink: 'View guide',
     action: 'Verify with PakID',
     required: true,
   },
@@ -110,8 +113,9 @@ export const STUDENT_ACTIVATION_STEPS: ActivationStep[] = [
 export const IT_COMPANY_ACTIVATION_STEPS: ActivationStep[] = [
   {
     title: 'Verify your identity with PakID',
-    // The description paragraph also holds the "View guide" link, so its text ends with it.
-    description: 'Complete the one-time identity verification through NADRA. View guide',
+    description: 'Complete the one-time identity verification through NADRA.',
+    // Some deployments append a "View guide" link inside the description paragraph.
+    trailingLink: 'View guide',
     action: 'Verify with PakID',
     required: true,
   },

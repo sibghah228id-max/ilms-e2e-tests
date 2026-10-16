@@ -303,7 +303,14 @@ export class DashboardPage {
   /** A step's row: title, description (with `pct` filled in) and, unless completed, its action. */
   private async expectStep(step: ActivationStep, pct?: number) {
     await expect(this.checklist.item(step.title)).toBeVisible();
-    await expect(this.checklist.itemDescription(step.title)).toHaveText(step.description.replace('{pct}', String(pct)));
+    const description = step.description.replace('{pct}', String(pct));
+    const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // The description paragraph may end with a link (e.g. "View guide") on some deployments; the
+    // sentence itself must match exactly either way.
+    const expected = step.trailingLink
+      ? new RegExp(`^${escape(description)}(\\s+${escape(step.trailingLink)})?$`)
+      : description;
+    await expect(this.checklist.itemDescription(step.title)).toHaveText(expected);
     if ((await this.checklist.state(step.title)) !== 'completed') {
       await expect(this.checklist.action(step.title, step.action)).toBeVisible();
     }
