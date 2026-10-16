@@ -76,7 +76,8 @@ export const ACTIVATION_CHECKLIST = {
 export const STUDENT_ACTIVATION_STEPS: ActivationStep[] = [
   {
     title: 'Verify your identity with PakID',
-    description: 'Complete the one-time identity verification through NADRA.',
+    // The description paragraph also holds the "View guide" link, so its text ends with it.
+    description: 'Complete the one-time identity verification through NADRA. View guide',
     action: 'Verify with PakID',
     required: true,
   },
@@ -109,7 +110,8 @@ export const STUDENT_ACTIVATION_STEPS: ActivationStep[] = [
 export const IT_COMPANY_ACTIVATION_STEPS: ActivationStep[] = [
   {
     title: 'Verify your identity with PakID',
-    description: 'Complete the one-time identity verification through NADRA.',
+    // The description paragraph also holds the "View guide" link, so its text ends with it.
+    description: 'Complete the one-time identity verification through NADRA. View guide',
     action: 'Verify with PakID',
     required: true,
   },
