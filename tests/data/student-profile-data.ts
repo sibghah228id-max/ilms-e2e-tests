@@ -23,6 +23,12 @@ export type SkillRating = { name: string; rating: number };
 
 export const studentProfileData = {
   personal: {
+    // Registration normally supplies these three, so they are only used when the account under
+    // test has none stored yet (an older account can predate the fields).
+    /** 10 digits starting with 3; the +92 country code belongs to the field and is not typed. */
+    phone: '3001234567',
+    dateOfBirth: '1999-09-12',
+    gender: 'Female',
     /** Typed into the City combobox; the matching option is picked from the list. */
     citySearch: 'Islamabad',
     address: 'House 12, Street 4, Sector G-10',

@@ -71,17 +71,19 @@ export class FeatureTourDialog {
   }
 
   /**
-   * Skips the tour if it shows up within `timeout`. The tour card repositions itself right after
-   * appearing, so a first click can land beside the button; retry until the dialog is gone.
+   * Skips the tour if it shows up within `timeout`, and reports whether there was one. The tour
+   * card repositions itself right after appearing, so a first click can land beside the button;
+   * retry until the dialog is gone.
    */
-  async skipIfShown(timeout = 10_000) {
+  async skipIfShown(timeout = 10_000): Promise<boolean> {
     const shown = await this.dialog.waitFor({ state: 'visible', timeout }).then(() => true, () => false);
-    if (!shown) return;
+    if (!shown) return false;
 
     await expect(async () => {
       await this.skipButton.click({ timeout: 3_000 });
       await expect(this.dialog).toBeHidden({ timeout: 3_000 });
     }).toPass({ timeout: 20_000, intervals: [500, 1_000] });
+    return true;
   }
 }
 
@@ -199,8 +201,11 @@ export class DashboardPage {
    * Walks the welcome preview with "Next" until its finishing button, then skips the feature tour.
    * The preview appears only after the dashboard has fetched the walkthrough state, so it gets a
    * moment to show up; if it opens without a way forward, "Skip preview" is the fallback.
+   *
+   * Reports which of the two were actually there: both are first-login only, and a run that sees
+   * neither is a normal later login, not a failure.
    */
-  async completeOnboarding(previewTimeout = 10_000, tourTimeout = 10_000) {
+  async completeOnboarding(previewTimeout = 10_000, tourTimeout = 10_000): Promise<{ preview: boolean; tour: boolean }> {
     const shown = await this.preview.dialog.waitFor({ state: 'visible', timeout: previewTimeout }).then(() => true, () => false);
     if (shown) {
       while (await this.preview.nextButton.isVisible()) await this.preview.nextButton.click();
@@ -211,7 +216,7 @@ export class DashboardPage {
       }
       await expect(this.preview.dialog).toBeHidden();
     }
-    await this.tour.skipIfShown(tourTimeout);
+    return { preview: shown, tour: await this.tour.skipIfShown(tourTimeout) };
   }
 
   /**
@@ -229,6 +234,14 @@ export class DashboardPage {
    */
   async openMyProjects() {
     await this.openSidebarLink('My Projects', 'Projects');
+  }
+
+  /**
+   * Sidebar "My Profile", which opens the profile wizard. It is a top-level entry, so the group
+   * name is only the fallback for a collapsed sidebar.
+   */
+  async openMyProfile() {
+    await this.openSidebarLink('My Profile', 'Profile');
   }
 
   /** Sidebar "Social Wall"; the entry sits in the "Socialize" group. */

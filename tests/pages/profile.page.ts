@@ -41,6 +41,18 @@ export const PROFESSIONAL_PROFILE_STEP_HEADINGS = {
  * experience, certificates, achievements, publications) are inline sections added with an
  * "Add …" button; their inputs carry stable ids such as `experiences.0.title`.
  */
+/** Repeatable sections of the wizard, named after the id prefix their fields carry. */
+export type ProfileRecordSection = 'educations' | 'experiences' | 'certifications' | 'achievements' | 'publications';
+
+/** Whether a record was already on the account ("kept") or created by this run ("added"). */
+export type RecordOutcome = 'kept' | 'added';
+
+/** Personal Details after the step: the account's name, and whether it had to be repaired. */
+export type PersonalDetailsOutcome = { fullName: string; nameRepaired: boolean };
+
+/** What one skill category holds after the step, and which of it this run selected. */
+export type SkillCategoryOutcome = { category: string; selected: string[]; added: string[] };
+
 export class ProfilePage extends ReactAriaPage {
   readonly saveAndNextButton: Locator;
   readonly saveButton: Locator;
@@ -172,7 +184,7 @@ export class ProfilePage extends ReactAriaPage {
    * Registration already filled name, email, phone, date of birth and gender; those are checked
    * and kept. City, address and description are the required fields still empty for a new account.
    */
-  async completeMissingPersonalDetails(data: StudentProfileData['personal']) {
+  async completeMissingPersonalDetails(data: Pick<StudentProfileData['personal'], 'citySearch' | 'address' | 'description'>) {
     await expect(this.byId('fullName')).not.toHaveValue('');
     await expect(this.byId('email')).not.toHaveValue('');
     await expect(this.byId('phone_e164')).not.toHaveValue('');
@@ -291,7 +303,10 @@ export class ProfilePage extends ReactAriaPage {
     // Choosing the 7th or 8th semester reveals the final-year project fields, both required.
     const fypName = this.main.getByRole('textbox', { name: /^FYP Name/ });
     const fypDetails = this.main.getByRole('textbox', { name: /^FYP Details/ });
-    const finalYear = /^(7|8)(th)?\b/i.test(data.semester ?? '');
+    // The FYP fields follow the semester the record actually holds, which for an existing
+    // record is the saved one rather than the one in the test data.
+    const chosenSemester = (await semester.count()) > 0 ? (await semester.inputValue()).trim() : (data.semester ?? '');
+    const finalYear = /^(7|8)(th)?\b/i.test(chosenSemester);
     if (finalYear) {
       await expect(fypName, 'FYP Name should appear for the 7th/8th semester').toBeVisible();
       await expect(fypDetails, 'FYP Details should appear for the 7th/8th semester').toBeVisible();
@@ -453,5 +468,220 @@ export class ProfilePage extends ReactAriaPage {
 
     await this.byId('publications.0.publishDate').fill(data.publishDate);
     await this.byId('publications.0.linkOrDoi').fill(data.link);
+  }
+
+  // ---- Working on an account that already holds data ----------------------------------------
+  //
+  // The methods below drive the same wizard for an account that has been used before: every
+  // record and every field is looked at first, whatever is already stored is kept untouched, and
+  // only what is missing is filled in. They add nothing a second time, so the wizard can be run
+  // over the same account again without piling up duplicate records.
+
+  /** Field every record of a repeatable section renders, used to count the records. */
+  private static readonly RECORD_KEY_FIELD = {
+    educations: 'institutionId',
+    experiences: 'title',
+    certifications: 'name',
+    achievements: 'awardType',
+    publications: 'title',
+  } as const;
+
+  /**
+   * How many records a repeatable section currently holds. Each record renders its fields under
+   * an indexed id (`experiences.0.title`, `certifications.1.name`, …), so counting one field per
+   * record counts the records themselves — saved ones and any added since the step opened.
+   */
+  async recordCount(section: ProfileRecordSection): Promise<number> {
+    const field = ProfilePage.RECORD_KEY_FIELD[section];
+    return this.page.locator(`[id^="${section}."][id$=".${field}"]`).count();
+  }
+
+  // ---- Step 1: Personal Details (existing account) ------------------------------------------
+
+  /**
+   * Every required field of Personal Details, filled only where the account has nothing stored.
+   *
+   * Unlike completeMissingPersonalDetails — written for a fresh signup, where registration has
+   * just supplied phone, date of birth and gender — this assumes nothing about which fields came
+   * with the account: each one is read first and written only when it comes back empty.
+   */
+  async ensurePersonalDetails(data: StudentProfileData['personal']): Promise<PersonalDetailsOutcome> {
+    await this.dismissProfileCompletionOverlays();
+
+    // Name and email identify the signed-in account; the portal always has them.
+    await expect(this.byId('fullName'), 'the account should bring its full name').not.toHaveValue('');
+    await expect(this.byId('email'), 'the account should bring its email address').not.toHaveValue('');
+
+    const { fullName, repaired } = await this.repairFullName();
+
+    await this.fillIfEmpty(this.byId('phone_e164'), data.phone);
+    await this.fillIfEmpty(this.byId('dob'), data.dateOfBirth);
+    await this.ensureGender(data.gender);
+    await this.pickComboIfEmpty(
+      this.page.getByRole('combobox', { name: /^City/ }),
+      data.citySearch,
+      new RegExp(`^${escapeRegExp(data.citySearch)}`),
+    );
+    await this.fillIfEmpty(this.byId('address'), data.address);
+    await this.fillEditorIfEmpty(this.main.locator('[contenteditable="true"]').first(), data.description);
+
+    return { fullName, nameRepaired: repaired };
+  }
+
+  /**
+   * The step will not save while the stored name holds anything but English letters: the form
+   * answers "Save & Next" with "Name must contain only English letters" and stays on the step,
+   * however long it is given (verified on staging, 2026-10-16).
+   *
+   * Where the portal lets the name be edited, the characters it rejects are dropped so the step
+   * can be saved. Where it renders the field read-only — as it does for the account in
+   * tests/data/student-login.json, stored as "Test Student 1" — nothing in the browser can fix
+   * it, so the run stops here with what has to be changed, instead of ending 90 seconds later on
+   * a bare "Save & Next" rejection.
+   *
+   * A name the portal accepts is never touched.
+   */
+  private async repairFullName(): Promise<{ fullName: string; repaired: boolean }> {
+    const field = this.byId('fullName');
+    const stored = (await field.inputValue()).trim();
+    if (/^[A-Za-z ]+$/.test(stored)) return { fullName: stored, repaired: false };
+
+    const accepted = stored.replace(/[^A-Za-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    expect(
+      await field.isEditable(),
+      `the account's name "${stored}" breaks the portal's own rule ("Name must contain only ` +
+        'English letters"), which blocks every save of Personal Details, and the form renders the ' +
+        'field read-only so no test can correct it. Rename the account to letters only, or point ' +
+        'tests/data/student-login.json at an account whose name already is',
+    ).toBeTruthy();
+
+    expect(accepted, `the stored name "${stored}" holds no English letters at all`).not.toBe('');
+    await field.fill(accepted);
+    await expect(field).toHaveValue(accepted);
+    return { fullName: accepted, repaired: true };
+  }
+
+  /** Selects a gender only when none is selected yet; an existing choice is left alone. */
+  async ensureGender(gender: string) {
+    const group = this.page.getByRole('radiogroup', { name: 'Gender' });
+    await expect(group).toBeVisible();
+
+    if ((await group.getByRole('radio', { checked: true }).count()) === 0) {
+      // React-aria radios hide the <input> behind its <label>, so the visible text is clicked.
+      await group.getByText(gender, { exact: true }).click();
+    }
+    await expect(group.getByRole('radio', { checked: true }), 'a gender should be selected').toHaveCount(1);
+  }
+
+  // ---- Step 2: Education (existing account) -------------------------------------------------
+
+  /**
+   * Keeps an existing education record (completing only its empty fields) and creates a record
+   * only when the account has none. Reports which of the two happened.
+   */
+  async ensureEducation(data: Parameters<ProfilePage['completeMissingEducationDetails']>[0]): Promise<RecordOutcome> {
+    await this.waitForProfileRefetchesToSettle();
+    const existing = await this.recordCount('educations');
+    // Adds the record itself only when there is none, then fills what is still empty in it.
+    await this.completeMissingEducationDetails(data);
+    return existing > 0 ? 'kept' : 'added';
+  }
+
+  // ---- Step 3: Skills & Languages (existing account) ----------------------------------------
+
+  /** The chips of a multi-select combobox; each one carries the remove button of its tag. */
+  private tagChips(combo: Locator): Locator {
+    return combo
+      .locator('xpath=ancestor::*[@role="group"][1]')
+      .locator('button[slot="remove"]')
+      .locator('xpath=parent::*');
+  }
+
+  /** What a category currently holds, as its chips print it. */
+  async selectedTagNames(combo: Locator): Promise<string[]> {
+    return (await this.tagChips(combo).allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  }
+
+  /**
+   * Fills Skills & Languages without disturbing what the account already has: a category holding
+   * a selection keeps it, ratings included, and only an empty category gets the test-data entry —
+   * which is then rated out of 100, a newly added skill carrying the portal's own default rather
+   * than a rating the user chose.
+   *
+   * Returns what each category ended up with and which of it this run selected.
+   */
+  async ensureSkillsAndLanguages(data: StudentProfileData['skills']): Promise<SkillCategoryOutcome[]> {
+    const categories: Array<{ label: RegExp; title: string; skill: SkillRating }> = [
+      { label: /^Core Skills/, title: 'Core Skills', skill: data.core },
+      { label: /^Secondary Skills/, title: 'Secondary Skills', skill: data.secondary },
+      { label: /^Technical Skills/, title: 'Technical Skills', skill: data.technical },
+      { label: /^Languages/, title: 'Languages', skill: data.language },
+    ];
+
+    const outcome: SkillCategoryOutcome[] = [];
+    const added: SkillRating[] = [];
+    for (const { label, title, skill } of categories) {
+      const combo = this.page.getByRole('combobox', { name: label });
+      await expect(combo, `the step should offer a "${title}" field`).toBeVisible();
+
+      const existing = await this.selectedTagNames(combo);
+      if (existing.length > 0) {
+        outcome.push({ category: title, selected: existing, added: [] });
+        continue;
+      }
+
+      await this.addTag(combo, skill.name);
+      added.push(skill);
+      outcome.push({ category: title, selected: [skill.name], added: [skill.name] });
+    }
+
+    if (added.length > 0) {
+      await expect(this.main.getByRole('heading', { name: 'Rate the selected skills out of 100' })).toBeVisible();
+      // Only the entries added just now are rated; a rating the account already carries is kept.
+      for (const skill of added) {
+        await this.setSlider(this.ratingSlider(skill.name), skill.rating);
+      }
+    }
+    return outcome;
+  }
+
+  // ---- Step 4: Experience (existing account) ------------------------------------------------
+
+  /** Adds one experience record only when the account has none. */
+  async ensureExperience(data: StudentProfileData['experience']): Promise<RecordOutcome> {
+    await this.waitForProfileRefetchesToSettle();
+    if ((await this.recordCount('experiences')) > 0) return 'kept';
+
+    await this.addExperience(data);
+    return 'added';
+  }
+
+  // ---- Step 5: Certificates, Achievements, Publications (existing account) ------------------
+
+  /** Adds one certificate only when the account has none. */
+  async ensureCertificate(data: StudentProfileData['certificate']): Promise<RecordOutcome> {
+    await this.waitForProfileRefetchesToSettle();
+    if ((await this.recordCount('certifications')) > 0) return 'kept';
+
+    await this.addCertificate(data);
+    return 'added';
+  }
+
+  /** Adds one achievement only when the account has none. */
+  async ensureAchievement(data: StudentProfileData['achievement']): Promise<RecordOutcome> {
+    await this.waitForProfileRefetchesToSettle();
+    if ((await this.recordCount('achievements')) > 0) return 'kept';
+
+    await this.addAchievement(data);
+    return 'added';
+  }
+
+  /** Adds one publication only when the account has none. */
+  async ensurePublication(data: StudentProfileData['publication']): Promise<RecordOutcome> {
+    await this.waitForProfileRefetchesToSettle();
+    if ((await this.recordCount('publications')) > 0) return 'kept';
+
+    await this.addPublication(data);
+    return 'added';
   }
 }
