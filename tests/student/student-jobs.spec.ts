@@ -6,6 +6,7 @@ import { browseStudentJobs } from '../helpers/browse-student-jobs';
 import { filterGovernmentJobs } from '../helpers/filter-student-jobs';
 import { applyToFilteredGovernmentJob } from '../helpers/apply-external-job';
 import { searchForVisiblePrivateJob } from '../helpers/search-student-jobs';
+import { filterPrivateJobs } from '../helpers/filter-private-jobs';
 
 // Email, password and OTP come from tests/data/student-login.json only; change them there.
 const { student: user } = credentials;
@@ -26,6 +27,8 @@ const { student: user } = credentials;
  *   apply-external-job.ts    all four filters at once, a job's details page, the external apply
  *                            tab, and the breadcrumb back to the listing
  *   search-student-jobs.ts   searching the Private listing for a job that is on screen
+ *   filter-private-jobs.ts   the search cleared, then Location, Job Type and Skills one at a
+ *                            time, each followed by Reset
  *
  * Every step is checked against the jobs the portal really returned, not just against the
  * control that was clicked.
@@ -63,7 +66,7 @@ test.describe('Student jobs (registered account)', () => {
     test.info().annotations.push({ type: 'jobs-apply', description: JSON.stringify(applied) });
   });
 
-  test('finds a Private job by searching for a title the listing is showing', async ({ page }) => {
+  test('searches the Private listing, then filters it by location, job type and skills', async ({ page }) => {
     // ---- Login → OTP if asked → dashboard.
     const login = new StudentLoginPage(page);
     await login.goto();
@@ -77,5 +80,10 @@ test.describe('Student jobs (registered account)', () => {
     // ---- Jobs → All → Private, a title off the listing, then that same title searched for.
     const search = await searchForVisiblePrivateJob(page);
     test.info().annotations.push({ type: 'jobs-search-summary', description: JSON.stringify(search) });
+
+    // ---- Search cleared, then the Private rail: Location, Job Type and Skills, one at a time,
+    // each followed by Reset. The Job Source stays Private throughout.
+    const filters = await filterPrivateJobs(page, search.listedBefore);
+    test.info().annotations.push({ type: 'jobs-private-filters', description: JSON.stringify(filters) });
   });
 });

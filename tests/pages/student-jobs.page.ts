@@ -18,7 +18,40 @@ export type ListedJob = {
   apply_url?: string | null;
   source?: string | null;
   source_id?: string | null;
+  /** Private jobs carry their city as a plain name, and their skills as records. */
+  location?: string | null;
+  skills?: { name?: string | null }[] | null;
 };
+
+/** The filters the rail offers for the Private source. */
+export type PrivateFilter = 'Location' | 'Job Type' | 'Skills';
+
+/**
+ * What each Private filter is: the control it uses and the field of a job it speaks about.
+ *
+ *   Location   a city select, 700-odd cities long, most of which no job is in. It is the only
+ *              one that goes to the server: GET /api/jobs?...&location=<city>. Opening it is
+ *              worth doing once and no more: a listbox of that size makes trace snapshots so
+ *              large that closing the browser afterwards takes minutes.
+ *   Job Type   checkboxes (Onsite, Hybrid, Remote, Contract, Freelance), done in the browser
+ *   Skills     an autocomplete that collects skills as removable tags, done in the browser
+ *
+ * Being done in the browser means they only ever filter the jobs the page has already loaded,
+ * which is why what they produce is checked against the jobs on screen rather than against a
+ * response - see helpers/filter-private-jobs.ts.
+ */
+const PRIVATE_FILTERS: Record<PrivateFilter, { kind: 'select' | 'checkbox' | 'tags'; field: keyof ListedJob }> = {
+  Location: { kind: 'select', field: 'location' },
+  'Job Type': { kind: 'checkbox', field: 'job_type' },
+  Skills: { kind: 'tags', field: 'skills' },
+};
+
+/** What a Private filter's values say about a job: its city, its type, or any of its skills. */
+export function privateJobValues(name: PrivateFilter, job: ListedJob): string[] {
+  if (name === 'Skills') return (job.skills ?? []).map((skill) => String(skill?.name ?? '').trim()).filter(Boolean);
+  const value = job[PRIVATE_FILTERS[name].field];
+  return value ? [String(value).trim()] : [];
+}
 
 /** The filters the rail offers for the Government feed. */
 export type GovFilter = 'Country' | 'Organization' | 'Job Type' | 'Work Mode';
@@ -355,6 +388,182 @@ export class StudentJobsPage {
     this.active.clear();
   }
 
+  // ---- Filter rail, Private source ------------------------------------------------------------
+
+  /** The rail beside the listing. Each source has its own; only the active one is on screen. */
+  get filterRail(): Locator {
+    return this.main.locator('aside').locator('visible=true').first();
+  }
+
+  /**
+   * The header of a Private filter section.
+   *
+   * Unlike the Government rail's, these headers carry no `aria-expanded`, so whether a section
+   * is open is told from whether its control is in the page - see openPrivateFilter().
+   */
+  privateSection(name: PrivateFilter): Locator {
+    return this.filterRail.getByRole('button', { name: new RegExp(`^${escapeRegExp(name)}$`) }).first();
+  }
+
+  /** The control a Private filter is operated with: a select, a list of boxes, or an autocomplete. */
+  privateControl(name: PrivateFilter): Locator {
+    const panel = this.privateSection(name).locator('xpath=parent::*');
+    switch (PRIVATE_FILTERS[name].kind) {
+      case 'select':
+        return panel.locator('button[aria-haspopup="listbox"]');
+      case 'checkbox':
+        return panel.locator('label');
+      default:
+        return panel.locator('input[role="combobox"]');
+    }
+  }
+
+  /**
+   * Opens a Private filter section unless its control is already showing.
+   *
+   * Choosing a value in a select closes the section again, so this is called before reading a
+   * control as well as before using one.
+   */
+  async openPrivateFilter(name: PrivateFilter): Promise<Locator> {
+    const section = this.privateSection(name);
+    await expect(section, `the filter rail should offer "${name}"`).toBeVisible({ timeout: 30_000 });
+
+    if ((await this.privateControl(name).count()) === 0) {
+      await section.click();
+    }
+    await expect(this.privateControl(name).first(), `the "${name}" filter should be open`).toBeVisible({
+      timeout: 30_000,
+    });
+    return section.locator('xpath=parent::*');
+  }
+
+  /** One entry of the Job Type boxes, found by its label. */
+  private privateCheckbox(value: string): Locator {
+    return this.privateControl('Job Type').filter({ hasText: new RegExp(`^${escapeRegExp(value)}$`) });
+  }
+
+  /** A skill that has been added, as the tag it becomes. */
+  skillTag(value: string): Locator {
+    return this.privateSection('Skills')
+      .locator('xpath=parent::*')
+      .locator('span')
+      .filter({ has: this.page.locator('[slot="remove"]') })
+      .filter({ hasText: new RegExp(`^${escapeRegExp(value)}$`) });
+  }
+
+  /**
+   * Sets a Private filter to `value`.
+   *
+   * Nothing is awaited on the network here: only Location asks the server, and the page serves a
+   * combination it has already loaded from cache, so the caller waits on the listing instead -
+   * which is what has to change anyway.
+   */
+  async applyPrivateFilter(name: PrivateFilter, value: string) {
+    await this.openPrivateFilter(name);
+
+    if (PRIVATE_FILTERS[name].kind === 'checkbox') {
+      const box = this.privateCheckbox(value);
+      await expect(box, `the "${name}" filter should offer "${value}"`).toBeVisible({ timeout: 30_000 });
+      await box.first().click();
+    } else if (PRIVATE_FILTERS[name].kind === 'tags') {
+      // The list only offers what is typed, so the skill is named first and then picked. The
+      // autocomplete stays open afterwards, ready for another skill, so it is dismissed here -
+      // left open it sits over the rest of the rail.
+      const combo = this.privateControl(name).first();
+      await combo.fill(value);
+      await this.pickOption(value, name, { closes: false });
+      await this.page.keyboard.press('Escape');
+    } else {
+      await this.privateControl(name).first().click();
+      await this.pickOption(value, name);
+    }
+
+    await this.expectPrivateFilterSelected(name, value);
+  }
+
+  /** Picks `value` out of whichever listbox is open. A select closes on the choice; a tag list does not. */
+  private async pickOption(value: string, name: string, { closes = true } = {}) {
+    const listbox = this.page.getByRole('listbox');
+    const option = listbox.getByRole('option', { name: value, exact: true }).first();
+    await expect(option, `the "${name}" filter should offer "${value}"`).toBeVisible({ timeout: 30_000 });
+    await option.click();
+
+    if (closes) {
+      await expect(listbox, `the "${name}" list should close once "${value}" is picked`).toHaveCount(0);
+    }
+  }
+
+  /** The Job Type boxes on offer, read off their labels. */
+  async privateCheckboxOptions(name: PrivateFilter): Promise<string[]> {
+    await this.openPrivateFilter(name);
+    const labels = this.privateControl(name);
+    await expect(labels.first(), `the "${name}" filter should offer something to tick`).toBeVisible({
+      timeout: 30_000,
+    });
+    return (await labels.allInnerTexts()).map(clean).filter(Boolean);
+  }
+
+  /** The Private filter is holding `value`. */
+  async expectPrivateFilterSelected(name: PrivateFilter, value: string) {
+    await this.openPrivateFilter(name);
+
+    switch (PRIVATE_FILTERS[name].kind) {
+      case 'select':
+        await expect(
+          this.privateControl(name).first(),
+          `the "${name}" filter should now read "${value}"`,
+        ).toHaveText(value);
+        return;
+      case 'checkbox':
+        await expect(
+          this.privateCheckbox(value).locator('input[type="checkbox"]').first(),
+          `"${value}" should be ticked under "${name}"`,
+        ).toBeChecked();
+        return;
+      default:
+        await expect(this.skillTag(value).first(), `"${value}" should have been added to "${name}"`).toBeVisible();
+    }
+  }
+
+  /** Nothing is chosen for this Private filter: no city, no box ticked, no skill added. */
+  async expectPrivateFilterCleared(name: PrivateFilter) {
+    await this.openPrivateFilter(name);
+    const panel = this.privateSection(name).locator('xpath=parent::*');
+
+    switch (PRIVATE_FILTERS[name].kind) {
+      case 'select':
+        // Empty, the select shows its placeholder again ("Select a city").
+        await expect(
+          this.privateControl(name).first(),
+          `the "${name}" filter should be back to its placeholder`,
+        ).toHaveText(/^Select a/i);
+        return;
+      case 'checkbox':
+        await expect(
+          panel.locator('input[type="checkbox"]:checked'),
+          `nothing should be ticked under "${name}" any more`,
+        ).toHaveCount(0);
+        return;
+      default:
+        await expect(panel.locator('[slot="remove"]'), `no skill should be left under "${name}"`).toHaveCount(0);
+    }
+  }
+
+  /**
+   * The whole Private listing, asked for from the page itself: the jobs the rail filters over,
+   * with the city, type and skills each one carries.
+   */
+  async allPrivateJobs(): Promise<ListedJob[]> {
+    const path = '/api/jobs?scope=all&per_page=100';
+    const answer = await this.page.evaluate(async (listing) => {
+      const response = await fetch(listing, { headers: { accept: 'application/json' } });
+      return { ok: response.ok, status: response.status, body: await response.text() };
+    }, path);
+    expect(answer.ok, `${path} answered ${answer.status}`).toBeTruthy();
+
+    return jobsIn(JSON.parse(answer.body), path);
+  }
+
   // ---- Search --------------------------------------------------------------------------------
 
   /** The free-text search above the listing: "Search by job title...". */
@@ -391,6 +600,18 @@ export class StudentJobsPage {
       timeout: 30_000,
     });
     return this.listedTitles();
+  }
+
+  /**
+   * Empties the search box. The listing goes back to being unsearched, which the page stops
+   * accounting for with a "Showing ... for" line, so that line going away is what is waited for.
+   */
+  async clearSearch() {
+    await this.searchInput.fill('');
+    await expect(this.searchInput, 'the search field should be empty').toHaveValue('');
+    await expect(this.searchSummary, 'the listing should no longer be showing search results').toHaveCount(0, {
+      timeout: 30_000,
+    });
   }
 
   // ---- The listing ---------------------------------------------------------------------------
