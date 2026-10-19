@@ -1,5 +1,5 @@
 import { type Page, expect, test } from '@playwright/test';
-import { StudentJobsPage } from '../pages/student-jobs.page';
+import { StudentJobsPage, type ListedJob } from '../pages/student-jobs.page';
 
 export type JobsBrowseSummary = {
   privateJobs: number;
@@ -8,6 +8,8 @@ export type JobsBrowseSummary = {
   countryJobs: number;
   /** True when the chosen country had no jobs and the page showed its empty state instead. */
   countryEmpty: boolean;
+  /** The unfiltered Government listing, for whoever carries on with the rest of the filters. */
+  governmentListing: ListedJob[];
 };
 
 /**
@@ -81,5 +83,6 @@ export async function browseStudentJobs(page: Page, country?: string): Promise<J
     country: chosen!,
     countryJobs: countryJobs.length,
     countryEmpty: countryJobs.length === 0,
+    governmentListing: governmentJobs,
   };
 }

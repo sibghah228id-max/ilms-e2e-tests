@@ -3,6 +3,8 @@ import credentials from '../data/student-login.json';
 import { StudentLoginPage } from '../pages/login.page';
 import { DashboardPage } from '../pages/dashboard.page';
 import { browseStudentJobs } from '../helpers/browse-student-jobs';
+import { filterGovernmentJobs } from '../helpers/filter-student-jobs';
+import { applyToFilteredGovernmentJob } from '../helpers/apply-external-job';
 
 // Email, password and OTP come from tests/data/student-login.json only; change them there.
 const { student: user } = credentials;
@@ -15,14 +17,22 @@ const { student: user } = credentials;
  * own and no mailbox is involved. It starts from the dashboard the way the dashboard-login spec
  * leaves it, but runs on its own, so neither test depends on the other.
  *
- * What the Jobs part checks is in helpers/browse-student-jobs.ts: the default source, the
- * Government feed and the Country filter, each against the jobs the portal really returned.
+ * What the Jobs part checks lives in three helpers, each carrying on where the last stopped:
+ *
+ *   browse-student-jobs.ts   the default source, the Government feed, the Country filter
+ *   filter-student-jobs.ts   Country cleared, then Organization, Job Type and Work Mode one at a
+ *                            time, each followed by Reset
+ *   apply-external-job.ts    all four filters at once, a job's details page, the external apply
+ *                            tab, and the breadcrumb back to the listing
+ *
+ * Every step is checked against the jobs the portal really returned, not just against the
+ * control that was clicked.
  */
 test.describe('Student jobs (registered account)', () => {
   // Login round-trip, then two job feeds and a filtered one, all served by a slow staging box.
-  test.setTimeout(8 * 60_000);
+  test.setTimeout(10 * 60_000);
 
-  test('opens Jobs from the sidebar and filters by source and country', async ({ page }) => {
+  test('opens Jobs from the sidebar, filters the listing, and applies to a Government job', async ({ page }) => {
     // ---- Login → OTP if asked → dashboard.
     const login = new StudentLoginPage(page);
     await login.goto();
@@ -37,7 +47,17 @@ test.describe('Student jobs (registered account)', () => {
     await expect(dashboard.preview.dialog, 'the user guide should not be covering the page').toHaveCount(0);
 
     // ---- Jobs → All, Private by default, then Government, then the Country filter.
-    const summary = await browseStudentJobs(page);
+    const { governmentListing, ...summary } = await browseStudentJobs(page);
     test.info().annotations.push({ type: 'jobs', description: JSON.stringify(summary) });
+
+    // ---- Country cleared, then Organization, Job Type and Work Mode, each one on its own and
+    // each followed by Reset. governmentListing is the unfiltered listing every Reset goes back to.
+    const filters = await filterGovernmentJobs(page, governmentListing);
+    test.info().annotations.push({ type: 'jobs-filters', description: JSON.stringify(filters) });
+
+    // ---- All four filters together, then the job's details page, the external apply tab, and
+    // the breadcrumb back to the listing.
+    const applied = await applyToFilteredGovernmentJob(page);
+    test.info().annotations.push({ type: 'jobs-apply', description: JSON.stringify(applied) });
   });
 });
