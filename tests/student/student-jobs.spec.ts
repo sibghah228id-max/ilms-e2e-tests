@@ -7,6 +7,7 @@ import { filterGovernmentJobs } from '../helpers/filter-student-jobs';
 import { applyToFilteredGovernmentJob } from '../helpers/apply-external-job';
 import { searchForVisiblePrivateJob } from '../helpers/search-student-jobs';
 import { filterPrivateJobs } from '../helpers/filter-private-jobs';
+import { bookmarkAndFindJob } from '../helpers/bookmark-student-job';
 
 // Email, password and OTP come from tests/data/student-login.json only; change them there.
 const { student: user } = credentials;
@@ -29,6 +30,7 @@ const { student: user } = credentials;
  *   search-student-jobs.ts   searching the Private listing for a job that is on screen
  *   filter-private-jobs.ts   the search cleared, then Location, Job Type and Skills one at a
  *                            time, each followed by Reset
+ *   bookmark-student-job.ts  bookmarking a job and finding it again under "Bookmarked"
  *
  * Every step is checked against the jobs the portal really returned, not just against the
  * control that was clicked.
@@ -85,5 +87,22 @@ test.describe('Student jobs (registered account)', () => {
     // each followed by Reset. The Job Source stays Private throughout.
     const filters = await filterPrivateJobs(page, search.listedBefore);
     test.info().annotations.push({ type: 'jobs-private-filters', description: JSON.stringify(filters) });
+  });
+
+  test('bookmarks a job and finds it again under the "Bookmarked" scope', async ({ page }) => {
+    // ---- Login → OTP if asked → dashboard.
+    const login = new StudentLoginPage(page);
+    await login.goto();
+    await login.loginWithOtpIfShown(user.email, user.password, user.otp);
+
+    const dashboard = new DashboardPage(page);
+    await dashboard.expectVisible(60_000);
+    await dashboard.completeOnboarding();
+    await expect(dashboard.preview.dialog, 'the user guide should not be covering the page').toHaveCount(0);
+
+    // ---- Jobs → All, a job that is not bookmarked, then the "Bookmarked" scope. The bookmark is
+    // taken off again at the end, so the account is left as the test found it.
+    const bookmark = await bookmarkAndFindJob(page);
+    test.info().annotations.push({ type: 'jobs-bookmark', description: JSON.stringify(bookmark) });
   });
 });

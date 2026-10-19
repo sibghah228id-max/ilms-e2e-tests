@@ -21,7 +21,15 @@ export type ListedJob = {
   /** Private jobs carry their city as a plain name, and their skills as records. */
   location?: string | null;
   skills?: { name?: string | null }[] | null;
+  /** Whether the student has this job bookmarked, and the slug the bookmark is saved under. */
+  is_saved?: boolean | null;
+  slug?: string | null;
 };
+
+/** The entries of the select above the listing, which narrows it to a kind of job. */
+export type JobScope = 'All Jobs' | 'Applied' | 'Bookmarked' | 'Urgent' | 'Hiring';
+
+const SCOPES: JobScope[] = ['All Jobs', 'Applied', 'Bookmarked', 'Urgent', 'Hiring'];
 
 /** The filters the rail offers for the Private source. */
 export type PrivateFilter = 'Location' | 'Job Type' | 'Skills';
@@ -614,6 +622,142 @@ export class StudentJobsPage {
     });
   }
 
+  // ---- Scope, counts and bookmarks --------------------------------------------------------------
+
+  /**
+   * The select above the listing that narrows it to a kind of job: All Jobs, Applied,
+   * Bookmarked, Urgent or Hiring. It is found by the value it is showing, because that is what
+   * distinguishes it from the rail's own selects - its label is its current choice, so it stops
+   * reading "All Jobs" the moment something else is picked.
+   *
+   * Narrowing is done in the browser, over the jobs the page has loaded: no request is made.
+   */
+  get scopeTrigger(): Locator {
+    return this.main
+      .getByRole('button', { name: new RegExp(`^(${SCOPES.join('|')})$`) })
+      .locator('visible=true')
+      .first();
+  }
+
+  async selectScope(scope: JobScope) {
+    await expect(this.scopeTrigger, 'the listing should offer the job scope select').toBeVisible({ timeout: 30_000 });
+    await this.scopeTrigger.click();
+
+    const listbox = this.page.getByRole('listbox');
+    const option = listbox.getByRole('option', { name: scope, exact: true });
+    await expect(option, `the scope select should offer "${scope}"`).toBeVisible({ timeout: 30_000 });
+    await option.click();
+    await expect(listbox).toHaveCount(0);
+    await this.expectScope(scope);
+  }
+
+  /** `scope` is what the select is showing. */
+  async expectScope(scope: JobScope) {
+    await expect(this.scopeTrigger, `the listing should be narrowed to "${scope}"`).toHaveText(scope, {
+      timeout: 30_000,
+    });
+  }
+
+  /**
+   * The number on one of the tiles above the listing: "Total", "Applied" or "Bookmarked".
+   *
+   * The number is the tile label's next paragraph, which also keeps this off the scope select -
+   * that shows the word "Bookmarked" too when it is the choice, but has no number beside it.
+   */
+  statValue(label: string): Locator {
+    return this.main
+      .locator('p')
+      .filter({ hasText: new RegExp(`^${escapeRegExp(label)}$`) })
+      .locator('xpath=following-sibling::p[1]');
+  }
+
+  /** What a tile currently reads, or NaN while it has nothing to read. */
+  async statCount(label: string): Promise<number> {
+    const shown = (await this.statValue(label).allInnerTexts()).join('').replace(/[^\d-]/g, '');
+    return shown === '' ? Number.NaN : Number(shown);
+  }
+
+  /**
+   * Waits for the "Bookmarked" tile to read `expected`.
+   *
+   * Polled rather than read: bookmarking makes the tile flash a half-counted value for a moment
+   * before it settles, so a single read straight after the click sees the wrong number.
+   */
+  async expectBookmarkCount(expected: number, what: string) {
+    await expect
+      .poll(() => this.statCount('Bookmarked'), { message: what, timeout: 60_000 })
+      .toBe(expected);
+  }
+
+  /** The card of a job: the nearest wrapper holding both its title and its bookmark toggle. */
+  jobCard(title: string): Locator {
+    return this.main
+      .getByRole('heading', { level: 3, name: title, exact: true })
+      .locator('xpath=ancestor::div[.//button[@aria-label="Bookmark" or @aria-label="Bookmarked"]][1]');
+  }
+
+  /** The bookmark toggle on a job's card. Its aria-label is its state: "Bookmark" or "Bookmarked". */
+  bookmarkToggle(title: string): Locator {
+    return this.jobCard(title)
+      .locator('button[aria-label="Bookmark"], button[aria-label="Bookmarked"]')
+      .first();
+  }
+
+  /** Every toggle on screen that is not bookmarked, and every one that is. */
+  get unbookmarkedToggles(): Locator {
+    return this.main.locator('button[aria-label="Bookmark"]').locator('visible=true');
+  }
+
+  get bookmarkedToggles(): Locator {
+    return this.main.locator('button[aria-label="Bookmarked"]').locator('visible=true');
+  }
+
+  /** The title of the first card on screen that is not bookmarked yet. */
+  async firstUnbookmarkedTitle(): Promise<string> {
+    await expect(
+      this.unbookmarkedToggles.first(),
+      'the listing should show a job that is not bookmarked yet',
+    ).toBeVisible({ timeout: 30_000 });
+
+    const card = this.unbookmarkedToggles.first().locator('xpath=ancestor::div[.//h3][1]');
+    return clean(await card.locator('h3').first().innerText());
+  }
+
+  /**
+   * Bookmarks a job, or takes the bookmark off again - the control is one toggle.
+   *
+   * The call it makes carries the job's own slug (POST to save, DELETE to remove, both on
+   * /api/jobs/<slug>/save), so the response awaited is the one for the job whose title was
+   * asked for: a toggle that saved some other card could not pass. The icon is then checked to
+   * have flipped, which is the state the student is left looking at.
+   */
+  async toggleBookmark(title: string): Promise<'Bookmark' | 'Bookmarked'> {
+    const route = (await this.jobTitleLink(title).first().getAttribute('href')) ?? '';
+    expect(route, `the card for "${title}" should link to the job`).not.toBe('');
+
+    const toggle = this.bookmarkToggle(title);
+    await expect(toggle, `"${title}" should offer a bookmark toggle`).toBeVisible({ timeout: 30_000 });
+
+    const was = await toggle.getAttribute('aria-label');
+    const becomes = was === 'Bookmarked' ? 'Bookmark' : 'Bookmarked';
+    const saving = `/api/jobs/${route.replace(/^\/jobs\//, '')}/save`;
+
+    const answered = this.page.waitForResponse((r) => r.url().includes(saving), { timeout: 60_000 });
+    await toggle.click();
+    const response = await answered;
+    expect(
+      response.ok(),
+      `${response.request().method()} ${saving} answered ${response.status()} for "${title}"`,
+    ).toBeTruthy();
+
+    await expect(toggle, `the icon on "${title}" should now read "${becomes}"`).toHaveAttribute(
+      'aria-label',
+      becomes,
+      { timeout: 30_000 },
+    );
+    return becomes;
+  }
+
   // ---- The listing ---------------------------------------------------------------------------
 
   /** Titles of the job cards on screen (the hidden panel of the other source is left out). */
@@ -663,8 +807,8 @@ export class StudentJobsPage {
     expect(shown, `${what}: the cards on screen should be the jobs that were returned`).toEqual(expected);
   }
 
-  /** The card of a job, found by the title it shows (its `h3` carries the title as an attribute). */
-  jobCard(title: string): Locator {
+  /** The link a job's title is, found by the title it shows. */
+  jobTitleLink(title: string): Locator {
     return this.main
       .locator('a:visible')
       .filter({ has: this.page.getByRole('heading', { level: 3, name: title, exact: true }) })
@@ -679,10 +823,10 @@ export class StudentJobsPage {
    * the button to the job whose title was picked.
    */
   async openJobDetails(title: string): Promise<string> {
-    const card = this.jobCard(title);
-    await expect(card, `the listing should show a card for "${title}"`).toBeVisible({ timeout: 30_000 });
+    const link = this.jobTitleLink(title);
+    await expect(link, `the listing should show a card for "${title}"`).toBeVisible({ timeout: 30_000 });
 
-    const route = await card.getAttribute('href');
+    const route = await link.getAttribute('href');
     expect(route, `the card for "${title}" should link to the job`).toBeTruthy();
 
     const viewDetails = this.main
