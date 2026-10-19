@@ -1,4 +1,5 @@
 import { type Page, type Locator, type Response, expect } from '@playwright/test';
+import { escapeRegExp } from './react-aria.page';
 
 /** The two entries of the "Job Source" filter. */
 export type JobSource = 'Private' | 'Government';
@@ -354,6 +355,44 @@ export class StudentJobsPage {
     this.active.clear();
   }
 
+  // ---- Search --------------------------------------------------------------------------------
+
+  /** The free-text search above the listing: "Search by job title...". */
+  get searchInput(): Locator {
+    return this.main.locator('input[aria-label="Search"]').locator('visible=true');
+  }
+
+  /** "Showing N job(s) for", which the listing heads with once anything is being searched for. */
+  get searchSummary(): Locator {
+    return this.main.getByText(/Showing \d+ job/i).locator('visible=true');
+  }
+
+  /** "Title: <term>", the term the listing says it is showing results for. */
+  searchTerm(term: string): Locator {
+    return this.main.getByText(new RegExp(`Title:\\s*${escapeRegExp(term)}`, 'i')).locator('visible=true');
+  }
+
+  /**
+   * Searches the listing by job title and returns the titles left on screen.
+   *
+   * The search is done in the browser over the jobs the page has already loaded - typing fires
+   * no request - so there is nothing to await but the page's own account of what it is showing,
+   * which is what is waited for before the cards are read. Nothing is typed character by
+   * character either, so no debounce has to be guessed at.
+   */
+  async searchJobs(term: string): Promise<string[]> {
+    await expect(this.searchInput, 'the listing should offer a search').toBeVisible({ timeout: 30_000 });
+    await this.searchInput.fill(term);
+
+    await expect(this.searchSummary, 'the listing should say how many jobs the search left').toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(this.searchTerm(term), `the listing should say it is showing results for "${term}"`).toBeVisible({
+      timeout: 30_000,
+    });
+    return this.listedTitles();
+  }
+
   // ---- The listing ---------------------------------------------------------------------------
 
   /** Titles of the job cards on screen (the hidden panel of the other source is left out). */
@@ -361,7 +400,14 @@ export class StudentJobsPage {
     return this.main.locator('h3').locator('visible=true');
   }
 
-  /** The portal's "no jobs" copy, for a filter that matches nothing. */
+  /**
+   * The portal's "no jobs" copy, for a filter or a search that matches nothing: "No results
+   * found", with "We couldn't find any jobs matching your current filters" under it.
+   *
+   * Its heading is an `h3` like a job card's, so an empty listing reads as one "job" titled "No
+   * results found" - which is why what the listing holds is always checked against the jobs the
+   * portal returned rather than by counting cards alone.
+   */
   get emptyState(): Locator {
     return this.main.getByText(/no jobs|no results|no matching|try adjusting/i).locator('visible=true');
   }

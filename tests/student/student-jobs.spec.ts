@@ -5,6 +5,7 @@ import { DashboardPage } from '../pages/dashboard.page';
 import { browseStudentJobs } from '../helpers/browse-student-jobs';
 import { filterGovernmentJobs } from '../helpers/filter-student-jobs';
 import { applyToFilteredGovernmentJob } from '../helpers/apply-external-job';
+import { searchForVisiblePrivateJob } from '../helpers/search-student-jobs';
 
 // Email, password and OTP come from tests/data/student-login.json only; change them there.
 const { student: user } = credentials;
@@ -24,6 +25,7 @@ const { student: user } = credentials;
  *                            time, each followed by Reset
  *   apply-external-job.ts    all four filters at once, a job's details page, the external apply
  *                            tab, and the breadcrumb back to the listing
+ *   search-student-jobs.ts   searching the Private listing for a job that is on screen
  *
  * Every step is checked against the jobs the portal really returned, not just against the
  * control that was clicked.
@@ -59,5 +61,21 @@ test.describe('Student jobs (registered account)', () => {
     // the breadcrumb back to the listing.
     const applied = await applyToFilteredGovernmentJob(page);
     test.info().annotations.push({ type: 'jobs-apply', description: JSON.stringify(applied) });
+  });
+
+  test('finds a Private job by searching for a title the listing is showing', async ({ page }) => {
+    // ---- Login → OTP if asked → dashboard.
+    const login = new StudentLoginPage(page);
+    await login.goto();
+    await login.loginWithOtpIfShown(user.email, user.password, user.otp);
+
+    const dashboard = new DashboardPage(page);
+    await dashboard.expectVisible(60_000);
+    await dashboard.completeOnboarding();
+    await expect(dashboard.preview.dialog, 'the user guide should not be covering the page').toHaveCount(0);
+
+    // ---- Jobs → All → Private, a title off the listing, then that same title searched for.
+    const search = await searchForVisiblePrivateJob(page);
+    test.info().annotations.push({ type: 'jobs-search-summary', description: JSON.stringify(search) });
   });
 });
