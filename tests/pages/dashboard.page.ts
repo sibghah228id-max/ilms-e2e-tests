@@ -10,6 +10,18 @@ import {
 export const WALKTHROUGH_API = '/api/onboarding/walkthrough';
 
 /**
+ * Expected text of a checklist step's description, with the live completion `pct` filled in. When
+ * the step can end with a link (e.g. "View guide"), the sentence must match exactly and the link
+ * text may or may not follow, since some deployments render it and others do not.
+ */
+export function expectedStepDescription(step: ActivationStep, pct?: number): string | RegExp {
+  const description = step.description.replace('{pct}', String(pct));
+  if (!step.trailingLink) return description;
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escape(description)}(\\s+${escape(step.trailingLink)})?$`);
+}
+
+/**
  * "Welcome to INDUS Tech Connect" feature preview: a modal dialog shown on the dashboard until the
  * user finishes it (last-slide button) or clicks "Skip preview". Both outcomes are persisted through
  * the walkthrough API, so the preview is not shown again on later visits.
@@ -328,14 +340,7 @@ export class DashboardPage {
   /** A step's row: title, description (with `pct` filled in) and, unless completed, its action. */
   private async expectStep(step: ActivationStep, pct?: number) {
     await expect(this.checklist.item(step.title)).toBeVisible();
-    const description = step.description.replace('{pct}', String(pct));
-    const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // The description paragraph may end with a link (e.g. "View guide") on some deployments; the
-    // sentence itself must match exactly either way.
-    const expected = step.trailingLink
-      ? new RegExp(`^${escape(description)}(\\s+${escape(step.trailingLink)})?$`)
-      : description;
-    await expect(this.checklist.itemDescription(step.title)).toHaveText(expected);
+    await expect(this.checklist.itemDescription(step.title)).toHaveText(expectedStepDescription(step, pct));
     if ((await this.checklist.state(step.title)) !== 'completed') {
       await expect(this.checklist.action(step.title, step.action)).toBeVisible();
     }

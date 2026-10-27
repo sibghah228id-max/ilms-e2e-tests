@@ -1,6 +1,12 @@
 import { test, expect, type Page, type Response } from '@playwright/test';
 import { registerStudent } from '../helpers/register-student';
-import { ActivationChecklist, FeatureTourDialog, WelcomePreviewDialog, WALKTHROUGH_API } from '../pages/dashboard.page';
+import {
+  ActivationChecklist,
+  FeatureTourDialog,
+  WelcomePreviewDialog,
+  WALKTHROUGH_API,
+  expectedStepDescription,
+} from '../pages/dashboard.page';
 import {
   ACTIVATION_CHECKLIST,
   PROFILE_COMPLETION_TARGET,
@@ -44,7 +50,7 @@ async function expectChecklistSteps(checklist: ActivationChecklist, pct: number)
     await test.step(step.title, async () => {
       const row = checklist.item(step.title);
       await expect(row).toBeVisible();
-      await expect(checklist.itemDescription(step.title)).toHaveText(step.description.replace('{pct}', String(pct)));
+      await expect(checklist.itemDescription(step.title)).toHaveText(expectedStepDescription(step, pct));
       await expect(checklist.action(step.title, step.action)).toBeVisible();
 
       // Optional steps are told apart from activation requirements by the "(Optional)" suffix.
