@@ -264,9 +264,21 @@ export class DashboardPage {
    * not already showing, so no URL is assumed here and a renamed route is picked up from the page.
    */
   private async openSidebarLink(linkName: string, groupName: string) {
-    const link = this.page.getByRole('link', { name: linkName, exact: true });
+    // The sidebar is the complementary region holding "Log Out"; the profile wizard's stepper is a
+    // second complementary region whose headings ("Projects") would otherwise match too.
+    const sidebar = this.page.getByRole('complementary').filter({ has: this.logoutLink });
+    // Entry names differ per role: International Companies get "My Jobs" / "My Projects", while
+    // IT Companies get a collapsible "Jobs" / "Projects" group whose entry is named "Manage". So
+    // either the named link or the link inside the group of that name is accepted.
+    const named = sidebar.getByRole('link', { name: linkName, exact: true });
+    const inGroup = sidebar
+      .getByRole('group')
+      .filter({ has: this.page.getByText(groupName, { exact: true }) })
+      .getByRole('link');
+    const link = named.or(inGroup).first();
+
     if (!(await link.isVisible())) {
-      await this.page.getByText(groupName, { exact: true }).first().click();
+      await sidebar.getByText(groupName, { exact: true }).first().click();
     }
     await expect(link).toBeVisible({ timeout: 30_000 });
 
