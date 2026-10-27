@@ -120,9 +120,9 @@ export const IT_COMPANY_ACTIVATION_STEPS: ActivationStep[] = [
     required: true,
   },
   {
-    title: 'Verify your company with SECP',
+    title: 'Verify Your Company with SECP',
     description:
-      'The account owner or director must complete PakID verification before the company can be verified through SECP.',
+      "Complete your company verification with SECP to confirm your company's registration and authenticity.",
     action: 'Verify Company',
     required: true,
   },

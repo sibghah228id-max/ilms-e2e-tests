@@ -107,8 +107,8 @@ test.describe('IT Company signup (end to end)', () => {
     expect(progress.done).toBe(0);
 
     // SECP verification waits for the owner's PakID; the other steps are actionable straight away.
-    expect(await dashboard.checklist.state('Verify your company with SECP')).toBe('locked');
-    for (const step of IT_COMPANY_ACTIVATION_STEPS.filter((s) => s.title !== 'Verify your company with SECP')) {
+    expect(await dashboard.checklist.state('Verify Your Company with SECP')).toBe('locked');
+    for (const step of IT_COMPANY_ACTIVATION_STEPS.filter((s) => s.title !== 'Verify Your Company with SECP')) {
       expect(await dashboard.checklist.state(step.title)).toBe('pending');
       await expect(dashboard.checklist.action(step.title, step.action)).toBeEnabled();
     }
@@ -170,7 +170,7 @@ test.describe('IT Company signup (end to end)', () => {
     // PakID and SECP now show as completed, so the counter moves to 2 of 5 and the profile step unlocks.
     const verified = await dashboard.expectActivationChecklist(IT_COMPANY_ACTIVATION_STEPS);
     expect(await dashboard.checklist.state('Verify your identity with PakID')).toBe('completed');
-    expect(await dashboard.checklist.state('Verify your company with SECP')).toBe('completed');
+    expect(await dashboard.checklist.state('Verify Your Company with SECP')).toBe('completed');
     expect(verified.done).toBe(await dashboard.checklist.completedCount());
     expect(verified.done).toBeGreaterThanOrEqual(2);
 
