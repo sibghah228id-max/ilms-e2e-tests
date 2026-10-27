@@ -14,6 +14,20 @@ export type SubmittedApplication = {
 const TEXT_ANSWER = 'Answered by the end-to-end test suite.';
 
 /**
+ * What a job page says when it will not take an application from this student: the qualification,
+ * degree or experience it asks for and the student has not got. Used only to quote the page back
+ * in a skip message, never to decide anything, so a build that words it differently costs nothing.
+ */
+const REQUIREMENT_NOTICE = /qualificat|degree|master|bachelor|phd|eligib|requirement|do(es)? not meet/i;
+
+/**
+ * How the side panel labels the minimum qualification a job asks for. Anchored, so it matches the
+ * label on its own and not a sentence that happens to mention qualifications; the optional words
+ * cover the builds that render it as "Qualification" or "Minimum Qualification".
+ */
+const QUALIFICATION_LABEL = /^(minimum\s+)?qualification(\s+required)?$/i;
+
+/**
  * One job posted on the portal: /jobs/<slug>, reached from a card's "View Details".
  *
  * This is the Private counterpart of StudentJobDetailsPage, which covers the Government feed's
@@ -42,7 +56,10 @@ export class StudentPrivateJobPage {
     this.title = this.root.getByRole('heading', { level: 1 });
     this.breadcrumb = page.locator('nav[aria-label="Breadcrumb"]');
     this.applyNow = this.root.getByRole('button', { name: /^Apply Now$/i }).locator('visible=true');
-    this.appliedState = this.root.getByText('Applied', { exact: true }).locator('visible=true');
+    // The badge reads "Application Submitted" on current builds; older ones said just "Applied".
+    this.appliedState = this.root
+      .getByText(/^\s*(Applied|Application Submitted)\s*$/i)
+      .locator('visible=true');
     this.confirmDialog = page.getByRole('dialog').filter({ hasText: /Confirm Application/i });
     this.questionsDialog = page.getByRole('dialog').filter({ hasText: /Screening Questions/i });
   }
@@ -62,9 +79,63 @@ export class StudentPrivateJobPage {
     await expect(this.appliedState, 'the job should not already be applied for').toHaveCount(0);
   }
 
+  /**
+   * "Qualification Required" as the job's side panel shows it ("Bachelors", "Masters", "PhD"), or
+   * '' when this job names none - a job that set no minimum shows the entry as "-", which comes
+   * back as that dash rather than as an empty string.
+   *
+   * The value is the element after the label, which is how every label/value pair in this portal is
+   * built (see PostJobPage.reviewValue), so the element type is deliberately not pinned down.
+   */
+  async qualificationRequired(): Promise<string> {
+    const label = this.root.getByText(QUALIFICATION_LABEL).locator('visible=true');
+    if ((await label.count()) === 0) return '';
+
+    const value = label.first().locator('xpath=following-sibling::*[1]');
+    if ((await value.count()) === 0) return '';
+
+    return (await value.first().innerText()).replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Why this job cannot be applied for, or '' when it can be.
+   *
+   * A job whose requirements the student does not meet - a minimum qualification it asks for, say -
+   * still shows "Apply Now", but the portal renders it `disabled`, so clicking it only waits for an
+   * element that is never going to become enabled. This reports that state instead of walking into
+   * it, so a caller can leave the job alone and try another one.
+   *
+   * The button is given a moment to come good first: it also starts out disabled while the page is
+   * still hydrating, and that is not a requirement the student fails.
+   *
+   * The reason itself is read from the page rather than assumed: the button's own tooltip where it
+   * carries one, otherwise whatever the page says near it about requirements. A disabled button
+   * with nothing to explain it is reported as exactly that.
+   */
+  async applyBlockedReason(): Promise<string> {
+    if ((await this.applyNow.count()) === 0) return 'the page offers no "Apply Now"';
+
+    const button = this.applyNow.first();
+    const enabled = await expect(button).toBeEnabled({ timeout: 10_000 }).then(
+      () => true,
+      () => false,
+    );
+    if (enabled) return '';
+
+    const tooltip = ((await button.getAttribute('title')) ?? '').replace(/\s+/g, ' ').trim();
+    if (tooltip) return tooltip;
+
+    const notice = this.root.getByText(REQUIREMENT_NOTICE).locator('visible=true');
+    if (await notice.count()) {
+      return (await notice.first().innerText()).replace(/\s+/g, ' ').trim().slice(0, 200);
+    }
+
+    return '"Apply Now" is disabled and the page gives no reason for it';
+  }
+
   /** The application is filed: the action is gone and the page says so instead. */
   async expectApplied() {
-    await expect(this.appliedState.first(), 'the job page should now read "Applied"').toBeVisible({ timeout: 60_000 });
+    await expect(this.appliedState.first(), 'the job page should now read "Application Submitted"').toBeVisible({ timeout: 60_000 });
     await expect(this.applyNow, 'an applied job should not offer "Apply Now" again').toHaveCount(0);
   }
 

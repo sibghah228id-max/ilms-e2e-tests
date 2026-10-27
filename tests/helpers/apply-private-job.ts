@@ -2,10 +2,36 @@ import { type Page, expect, test } from '@playwright/test';
 import { StudentJobsPage, type ListedJob } from '../pages/student-jobs.page';
 import { StudentPrivateJobPage } from '../pages/student-private-job.page';
 
+/**
+ * The minimum qualification the student applies against. Written as a pattern so a build that
+ * renders it "Bachelor's" or "Bachelor" still matches the "Bachelors" the portal's own job wizard
+ * offers (see PostJobPage: the dropdown is Bachelors | Masters | PhD, spelled without apostrophes).
+ */
+const REQUIRED_QUALIFICATION = /^bachelor('?s)?\b/i;
+
+/**
+ * A job with no minimum qualification is open to the student too: the side panel then shows "-"
+ * (or another dash), or leaves the row out altogether, which reads back as ''.
+ */
+const NO_QUALIFICATION = /^[-–—\s]*$/;
+
+/** The student can apply against this "Qualification Required" value: Bachelors, or none set. */
+function acceptsQualification(qualification: string): boolean {
+  return NO_QUALIFICATION.test(qualification) || REQUIRED_QUALIFICATION.test(qualification);
+}
+
+/**
+ * How many jobs the run opens looking for one it can apply for. A cap, so a listing where every
+ * job asks for more than the student holds fails with a clear message instead of walking the feed.
+ */
+const MAX_JOBS_TO_INSPECT = 10;
+
 export type PrivateApplySummary = {
   /** The job that was applied for, by the title the listing showed for it. */
   job: string;
   slug: string;
+  /** "Qualification Required" as that job's side panel showed it. */
+  qualification: string;
   /** How many screening questions it asked. */
   questions: number;
   /** What the "Applied" tile read before and after. */
@@ -56,23 +82,77 @@ export async function applyToPrivateJob(page: Page): Promise<PrivateApplySummary
     `none of the ${onScreen.size} jobs on screen is open to apply for - ${records.filter((job) => job.has_applied).length} of ${records.length} have been applied for already, so this run has nothing to apply to`,
   ).toBeGreaterThan(0);
 
-  const target = candidates[0];
-  const title = clean(target.title);
-  annotate('jobs-apply-target', `"${title}" (${candidates.length} of ${onScreen.size} on screen still open)`);
+  annotate('jobs-apply-candidates', `${candidates.length} of ${onScreen.size} on screen still open to apply for`);
 
-  // The listing marks an applied job on its card, so the one that was picked should carry no mark.
-  await expect(
-    jobs.jobCard(title),
-    `"${title}" should not be marked as applied before applying`,
-  ).not.toContainText(/applied/i);
-
-  // ---- Its own page, and the three-step apply.
-  const route = await jobs.openJobDetails(title);
+  // ---- The job to apply for, found by opening the open ones in turn.
+  //
+  // Being open to applications is not enough. The student applies only for a job that asks for the
+  // qualification they hold, and the portal renders "Apply Now" disabled on a job whose minimum
+  // they do not meet, so clicking it would only wait on a button that is never going to enable.
+  // Neither fact is in the listing - the records carry no qualification - so each candidate is
+  // opened and its side panel read, and one that does not match is left alone and the next tried.
+  //
+  // The scan is capped at MAX_JOBS_TO_INSPECT so a listing full of jobs the student cannot apply
+  // for ends in a clear failure rather than walking the whole feed.
   const job = new StudentPrivateJobPage(page);
-  await job.expectVisible(route, title);
-  await job.expectNotApplied();
+  const shortlist = candidates.slice(0, MAX_JOBS_TO_INSPECT);
+  const skipped: string[] = [];
+  let applied:
+    | { title: string; slug: string; qualification: string; questions: number; endpoint: string; confirmation: string }
+    | undefined;
 
-  const { questions, endpoint, confirmation } = await job.applyWithScreeningQuestions();
+  for (const candidate of shortlist) {
+    const candidateTitle = clean(candidate.title);
+
+    // The listing marks an applied job on its card, so the one being tried should carry no mark.
+    await expect(
+      jobs.jobCard(candidateTitle),
+      `"${candidateTitle}" should not be marked as applied before applying`,
+    ).not.toContainText(/applied|application submitted/i);
+
+    const candidateRoute = await jobs.openJobDetails(candidateTitle);
+    await job.expectVisible(candidateRoute, candidateTitle);
+    await job.expectNotApplied();
+
+    // Qualification first: it is a read of the side panel, where the button check has to wait out
+    // the page settling, so this rules a job out without paying for that wait.
+    const qualification = await job.qualificationRequired();
+    const why = !acceptsQualification(qualification)
+      ? `Qualification Required is "${qualification}", not Bachelors, "-" or none`
+      : await job.applyBlockedReason();
+
+    if (why) {
+      skipped.push(`"${candidateTitle}" (${why})`);
+      annotate('jobs-apply-skipped', `"${candidateTitle}": ${why}`);
+
+      // Back to the listing to try the next one.
+      await job.openJobsFromBreadcrumb();
+      await expectListingShowingJobs(jobs);
+      continue;
+    }
+
+    annotate(
+      'jobs-apply-target',
+      `"${candidateTitle}" (Qualification Required "${qualification || 'not shown'}")` +
+        (skipped.length ? `, after skipping ${skipped.length}: ${skipped.join(', ')}` : ''),
+    );
+    applied = {
+      title: candidateTitle,
+      slug: String(candidate.slug ?? ''),
+      qualification,
+      ...(await job.applyWithScreeningQuestions()),
+    };
+    break;
+  }
+
+  expect(
+    applied,
+    'No Private job found with Qualification Required = Bachelors, "-" or none, and an enabled Apply button. ' +
+      `Checked ${shortlist.length} of the ${candidates.length} Private jobs still open to apply ` +
+      `for: ${skipped.join(', ')}`,
+  ).toBeTruthy();
+
+  const { title, slug, qualification: appliedQualification, questions, endpoint, confirmation } = applied!;
   annotate('jobs-apply-submitted', `"${title}": ${questions} questions, ${endpoint || 'no call seen'}`);
   annotate('jobs-apply-confirmation', confirmation || 'nothing was shown');
 
@@ -89,13 +169,7 @@ export async function applyToPrivateJob(page: Page): Promise<PrivateApplySummary
 
   // ---- Back on the listing: the count is up by one and the card carries the mark.
   await job.openJobsFromBreadcrumb();
-  await jobs.expectVisible();
-  await expect
-    .poll(async () => (await jobs.listedTitles()).length, {
-      message: 'the Jobs listing should be showing jobs again',
-      timeout: 60_000,
-    })
-    .toBeGreaterThan(0);
+  await expectListingShowingJobs(jobs);
 
   await jobs.expectStatCount(
     'Applied',
@@ -103,7 +177,7 @@ export async function applyToPrivateJob(page: Page): Promise<PrivateApplySummary
     `applying for "${title}" should take the "Applied" count to ${appliedBefore + 1}`,
   );
   const appliedAfter = await jobs.statCount('Applied');
-  await expect(jobs.jobCard(title), `"${title}" should now be marked as applied`).toContainText(/applied/i);
+  await expect(jobs.jobCard(title), `"${title}" should now be marked as applied`).toContainText(/applied|application submitted/i);
 
   // ---- And the listing narrowed to "Applied" has it.
   await jobs.selectScope('Applied');
@@ -129,7 +203,8 @@ export async function applyToPrivateJob(page: Page): Promise<PrivateApplySummary
 
   return {
     job: title,
-    slug: String(target.slug ?? ''),
+    slug,
+    qualification: appliedQualification,
     questions,
     appliedBefore,
     appliedAfter,
@@ -137,6 +212,21 @@ export async function applyToPrivateJob(page: Page): Promise<PrivateApplySummary
     confirmation,
     candidates: candidates.length,
   };
+}
+
+/**
+ * The listing is back and has jobs on it. Used after leaving a job page, both when backing out of
+ * one that refused an application and after the one that took it, since the next step either way
+ * reads the listing.
+ */
+async function expectListingShowingJobs(jobs: StudentJobsPage) {
+  await jobs.expectVisible();
+  await expect
+    .poll(async () => (await jobs.listedTitles()).length, {
+      message: 'the Jobs listing should be showing jobs again',
+      timeout: 60_000,
+    })
+    .toBeGreaterThan(0);
 }
 
 /** Still live, still inside its deadline, and not already applied for. */
