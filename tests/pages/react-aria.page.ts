@@ -111,8 +111,9 @@ export class ReactAriaPage {
 
   /**
    * Option names a combobox offers right now. The list opens on a key press and loads lazily, so
-   * the first option is awaited; placeholders ("Select …", "No results") are dropped. The list is
-   * closed again without picking anything, so calling this changes nothing.
+   * the first option is awaited; placeholders ("Select …", "No results") and disabled options
+   * (offered once a multi-select is full) are dropped. The list is closed again without picking
+   * anything, so calling this changes nothing.
    */
   async optionNames(combo: Locator): Promise<string[]> {
     await combo.click();
@@ -121,7 +122,8 @@ export class ReactAriaPage {
     await expect(listbox).toBeVisible({ timeout: 15_000 });
     await expect(this.page.getByRole('option').first()).toBeVisible({ timeout: 15_000 });
 
-    const names = (await this.page.getByRole('option').allInnerTexts())
+    const enabledOptions = this.page.getByRole('option').and(this.page.locator(':not([aria-disabled="true"])'));
+    const names = (await enabledOptions.allInnerTexts())
       .map((s) => s.replace(/\s+/g, ' ').trim())
       .filter((s) => s && !/^(select|choose|no options|no results)/i.test(s));
 

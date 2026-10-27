@@ -194,16 +194,17 @@ export class CompanyProfilePage extends ProfilePage {
     await expect(combo, `${field} should hold a value after the pick`).not.toHaveValue('');
   }
 
-  /** Names already selected as tag chips in a multi-choice category, matched against its options. */
-  async selectedTags(combo: Locator, options: string[]): Promise<string[]> {
+  /**
+   * Names already selected as tag chips in a multi-choice category. Each chip is its name in a
+   * paragraph next to a remove button, inside the combobox's group. The chips are read directly:
+   * once a category reaches its limit ("Up to 3"), its option list no longer contains them.
+   */
+  async selectedTags(combo: Locator): Promise<string[]> {
     const group = combo.locator('xpath=ancestor::*[@role="group"][1]');
     if ((await group.count()) === 0) return [];
 
-    // The group renders the label, the input and one chip per selection; matching whole lines
-    // against the known options drops the label and keeps "Communication" out of "Microwave
-    // Communication".
-    const lines = (await group.innerText()).split('\n').map((s) => s.replace(/\s+/g, ' ').trim());
-    return options.filter((option) => lines.includes(option));
+    const names = (await group.locator('p').allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim());
+    return [...new Set(names.filter(Boolean))];
   }
 
   /**
@@ -297,14 +298,16 @@ export class CompanyProfilePage extends ProfilePage {
       const combo = this.page.getByRole('combobox', { name: label });
       if ((await combo.count()) === 0) continue;
 
-      const options = await this.optionNames(combo);
-      expect(options.length, `${category} offers at least one option to choose from`).toBeGreaterThan(0);
-
-      const existing = await this.selectedTags(combo, options);
+      // Existing selections are kept. They are read before the option list: a full category only
+      // offers its remaining choices, and those are all disabled.
+      const existing = await this.selectedTags(combo);
       if (existing.length > 0) {
         selected.push(...existing);
         continue;
       }
+
+      const options = await this.optionNames(combo);
+      expect(options.length, `${category} offers at least one option to choose from`).toBeGreaterThan(0);
       await this.addTag(combo, options[0]);
       added[category] = options[0];
       selected.push(options[0]);
