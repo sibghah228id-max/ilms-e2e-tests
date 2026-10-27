@@ -8,6 +8,7 @@ import { applyToFilteredGovernmentJob } from '../helpers/apply-external-job';
 import { searchForVisiblePrivateJob } from '../helpers/search-student-jobs';
 import { filterPrivateJobs } from '../helpers/filter-private-jobs';
 import { bookmarkAndFindJob } from '../helpers/bookmark-student-job';
+import { applyToPrivateJob } from '../helpers/apply-private-job';
 
 // Email, password and OTP come from tests/data/student-login.json only; change them there.
 const { student: user } = credentials;
@@ -31,6 +32,7 @@ const { student: user } = credentials;
  *   filter-private-jobs.ts   the search cleared, then Location, Job Type and Skills one at a
  *                            time, each followed by Reset
  *   bookmark-student-job.ts  bookmarking a job and finding it again under "Bookmarked"
+ *   apply-private-job.ts     applying for a Private job and finding it again under "Applied"
  *
  * Every step is checked against the jobs the portal really returned, not just against the
  * control that was clicked.
@@ -104,5 +106,27 @@ test.describe('Student jobs (registered account)', () => {
     // taken off again at the end, so the account is left as the test found it.
     const bookmark = await bookmarkAndFindJob(page);
     test.info().annotations.push({ type: 'jobs-bookmark', description: JSON.stringify(bookmark) });
+  });
+
+  /**
+   * Applying cannot be undone: the application stays on the account, and this test uses up one of
+   * the Private jobs that are still open to it. It picks a job that has not been applied for, so
+   * runs do not collide with each other, and says so plainly if it ever runs out of them.
+   */
+  test('applies for a Private job and finds it again under the "Applied" scope', async ({ page }) => {
+    // ---- Login → OTP if asked → dashboard.
+    const login = new StudentLoginPage(page);
+    await login.goto();
+    await login.loginWithOtpIfShown(user.email, user.password, user.otp);
+
+    const dashboard = new DashboardPage(page);
+    await dashboard.expectVisible(60_000);
+    await dashboard.completeOnboarding();
+    await expect(dashboard.preview.dialog, 'the user guide should not be covering the page').toHaveCount(0);
+
+    // ---- Jobs → All → a job still open to applications → Apply Now → confirm → screening
+    // questions → the "Applied" scope.
+    const applied = await applyToPrivateJob(page);
+    test.info().annotations.push({ type: 'jobs-apply-private', description: JSON.stringify(applied) });
   });
 });

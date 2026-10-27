@@ -24,6 +24,10 @@ export type ListedJob = {
   /** Whether the student has this job bookmarked, and the slug the bookmark is saved under. */
   is_saved?: boolean | null;
   slug?: string | null;
+  /** Whether the student has already applied, and whether the job is still taking applications. */
+  has_applied?: boolean | null;
+  status?: string | null;
+  application_deadline?: string | null;
 };
 
 /** The entries of the select above the listing, which narrows it to a kind of job. */
@@ -678,15 +682,20 @@ export class StudentJobsPage {
   }
 
   /**
-   * Waits for the "Bookmarked" tile to read `expected`.
+   * Waits for one of the tiles to read `expected`.
    *
-   * Polled rather than read: bookmarking makes the tile flash a half-counted value for a moment
-   * before it settles, so a single read straight after the click sees the wrong number.
+   * Polled rather than read: bookmarking or applying makes a tile flash a half-counted value for
+   * a moment before it settles, so a single read straight afterwards sees the wrong number.
    */
-  async expectBookmarkCount(expected: number, what: string) {
+  async expectStatCount(label: string, expected: number, what: string) {
     await expect
-      .poll(() => this.statCount('Bookmarked'), { message: what, timeout: 60_000 })
+      .poll(() => this.statCount(label), { message: what, timeout: 60_000 })
       .toBe(expected);
+  }
+
+  /** Waits for the "Bookmarked" tile to read `expected`. */
+  async expectBookmarkCount(expected: number, what: string) {
+    await this.expectStatCount('Bookmarked', expected, what);
   }
 
   /** The card of a job: the nearest wrapper holding both its title and its bookmark toggle. */

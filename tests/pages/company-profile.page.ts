@@ -127,7 +127,7 @@ export class CompanyProfilePage extends ProfilePage {
    * with no value), the test cannot complete it: the gap is recorded with the run and left to the
    * following "Save & Next", which reports it if the portal rejects the step.
    */
-  private noteLockedEmptyField(field: string) {
+  protected noteLockedEmptyField(field: string) {
     const note = `${field} is locked but empty; the portal holds no value for it and it cannot be completed here`;
     console.warn(`[profile] ${note}`);
     test.info().annotations.push({ type: 'locked-empty-field', description: field });
@@ -153,7 +153,7 @@ export class CompanyProfilePage extends ProfilePage {
   }
 
   /** Fills a text field only when the portal left it empty; absent and locked fields are left alone. */
-  private async fillWhenEmpty(locator: Locator, value: string, field: string) {
+  protected async fillWhenEmpty(locator: Locator, value: string, field: string) {
     if ((await locator.count()) === 0) return;
     if (await locator.isDisabled()) {
       if (!(await locator.inputValue()).trim()) this.noteLockedEmptyField(field);
@@ -173,7 +173,7 @@ export class CompanyProfilePage extends ProfilePage {
    * Without a `preferred` name the first option is taken, which suits a field where any valid
    * option will do (Verticals). Never leave a country-style field without a preferred name.
    */
-  private async pickWhenEmpty(combo: Locator, preferred: string | undefined, field: string) {
+  protected async pickWhenEmpty(combo: Locator, preferred: string | undefined, field: string) {
     if ((await combo.count()) === 0) return;
     if ((await combo.inputValue()).trim()) return;
     if (await combo.isDisabled()) {

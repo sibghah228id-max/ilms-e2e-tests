@@ -1,7 +1,7 @@
 import { expect, type Locator } from '@playwright/test';
 import { CompanyProfilePage } from './company-profile.page';
 import type { ItCompanyData } from './create-account.page';
-import type { ItCompanyProfileData } from '../data/it-company-data';
+import { itCompanySignupData, type ItCompanyProfileData } from '../data/it-company-data';
 
 /** Stepper entries of the IT Company wizard (sidebar buttons, accessible names). */
 export const IT_COMPANY_PROFILE_STEPS = {
@@ -164,5 +164,144 @@ export class ItCompanyProfilePage extends CompanyProfilePage {
     await this.addTag(this.page.getByRole('combobox', { name: /^Skills Used/ }), data.skillUsed);
     await this.page.locator('textarea[name="projects.0.description"]').fill(data.description);
     await this.byId('projects.0.deliveryDate').fill(data.deliveryDate);
+  }
+
+  // ---- Registered account: complete only what the portal left empty -------------------------
+  //
+  // The methods above belong to a FRESH SIGNUP: they assert the values registration stored and add
+  // a record every time they run. The ones below are for an account that is already on the portal,
+  // where the profile is mostly filled and the run must add nothing it already has - so each one
+  // inspects what is there first, writes only into the gaps, and never adds a second copy of a
+  // record that exists. They mirror what CompanyProfilePage does for the International Company.
+
+  /** The IT Company stepper's own entries, which the student-shaped ProfilePage.openStep does not cover. */
+  itStepButton(step: keyof typeof IT_COMPANY_PROFILE_STEPS): Locator {
+    return this.page.getByRole('button', { name: IT_COMPANY_PROFILE_STEPS[step], exact: true });
+  }
+
+  /** Opens an IT Company step from the stepper and waits for its own heading. */
+  async openItStep(step: keyof typeof IT_COMPANY_PROFILE_STEPS) {
+    await this.itStepButton(step).click();
+    await expect(this.heading(IT_COMPANY_PROFILE_STEP_HEADINGS[step])).toBeVisible({ timeout: 30_000 });
+  }
+
+  /**
+   * Step 1 for a registered account: every empty field of Company Information is filled and every
+   * field that already holds a value is left exactly as it is.
+   *
+   * Nothing is asserted against signup data here - the account's own stored values are whatever
+   * the portal shows, so only genuinely empty fields are written. `accountEmail` covers the locked
+   * Email the portal can leave blank (see CompanyProfilePage.completeMissingCompanyInfoFields).
+   */
+  async completeMissingItCompanyInfo(data: ItCompanyProfileData['companyInfo'], accountEmail?: string) {
+    // Website and Verticals come from registration, so they are normally filled already; a gap is
+    // closed from the signup fixture / the field's own option list rather than left blank, because
+    // both are required and would otherwise block "Save & Next".
+    await this.fillWhenEmpty(this.byId('website'), itCompanySignupData.company.website, 'Website');
+    await this.pickWhenEmpty(this.byId('industry'), undefined, 'Verticals');
+    // Picked by option name with no search text: the headcount option carries an en dash ("11–50"),
+    // which typing as a filter would not match. This is the call the signup path uses too.
+    await this.pickComboIfEmpty(this.byId('employees'), '', data.employees);
+    await this.fillWhenEmpty(this.byId('estDate'), data.establishmentDate, 'Establishment Date');
+    await this.fillWhenEmpty(this.byId('linkedin'), data.linkedin, 'LinkedIn Profile URL');
+    await this.fillWhenEmpty(this.byId('officePhone'), data.officePhone, 'Office Phone');
+    if (accountEmail) await this.fillWhenEmpty(this.byId('email'), accountEmail, 'Email');
+
+    // Description is a rich-text editor; existing content is kept untouched.
+    await this.fillEditorIfEmpty(this.main.locator('[contenteditable="true"]').first(), data.description);
+
+    // "Human Resource": the first area row is completed only when it is still empty.
+    const areaSelect = this.main
+      .locator('select')
+      .filter({ has: this.page.locator('option', { hasText: 'Select area' }) })
+      .first();
+    if ((await areaSelect.count()) && !(await areaSelect.inputValue())) {
+      await areaSelect.selectOption({ label: data.humanResource.area });
+    }
+    const headcount = this.main.getByPlaceholder('e.g. 10').first();
+    if (await headcount.count()) await this.fillIfEmpty(headcount, data.humanResource.count);
+  }
+
+  /**
+   * Step 3 for a registered account: a stakeholder is added only when the step holds none at all.
+   * An account that already lists stakeholders keeps exactly what it has, so repeated runs never
+   * stack up duplicates.
+   *
+   * Returns 'kept' when the step already had one, 'added' when this run created the first.
+   */
+  async ensureStakeholder(stakeholder: ItCompanyProfileData['stakeholders'][number]): Promise<'kept' | 'added'> {
+    await this.waitForProfileRefetchesToSettle();
+
+    // A stakeholder that is already stored shows its name in the first section's Full Name field.
+    const existingName = this.byId('stakeholders.0.fullName');
+    if ((await existingName.count()) && (await existingName.inputValue()).trim()) return 'kept';
+
+    await this.addStakeholders([stakeholder]);
+    return 'added';
+  }
+
+  /**
+   * Step 4 for a registered account: benefits are selected only when the account has none ticked
+   * yet. A profile that already carries selections is left exactly as it is.
+   *
+   * Every category has to be OPENED before its boxes can be counted: a collapsed accordion keeps
+   * its options out of the DOM, so counting without opening reads zero on an account that does
+   * have benefits, and the run would then tick a further set onto a profile it was told to leave
+   * alone.
+   *
+   * Returns how many options this run ticked (0 when the account already had some).
+   */
+  async ensureBenefits(): Promise<number> {
+    if ((await this.countTickedBenefits()) > 0) return 0;
+    return this.selectAlternatingBenefits();
+  }
+
+  /** Ticked benefit boxes across all five categories, each opened so its options are rendered. */
+  private async countTickedBenefits(): Promise<number> {
+    const categories = this.main.getByRole('button', {
+      name: /^(Health & Wellness|Culture & Engagement|Office Equipment|Compensation & Awards|Learning & Growth)/,
+    });
+    const count = await categories.count();
+
+    let ticked = 0;
+    for (let c = 0; c < count; c++) {
+      const category = categories.nth(c);
+      const options = this.benefitOptions(category);
+      if (!(await options.count())) await category.click();
+      if (!(await options.count())) continue;
+      await expect(options.first()).toBeVisible();
+      ticked += await options.locator('input[type="checkbox"]:checked').count();
+    }
+    return ticked;
+  }
+
+  /**
+   * Step 6 for a registered account: a project is added only when the step holds none. Returns
+   * 'kept' when one was already stored, 'added' when this run created the first.
+   */
+  async ensureProject(data: ItCompanyProfileData['project']): Promise<'kept' | 'added'> {
+    await this.waitForProfileRefetchesToSettle();
+
+    const existingName = this.byId('projects.0.name');
+    if ((await existingName.count()) && (await existingName.inputValue()).trim()) return 'kept';
+
+    await this.addProject(data);
+    return 'added';
+  }
+
+  /**
+   * The status each stepper entry reports ("Completed", "Pending", ...), read from the entry's own
+   * text with the step name stripped off. Recorded by a run so the state of all six steps is
+   * visible in the report rather than only the one the wizard happens to be on.
+   */
+  async stepStatuses(): Promise<Record<string, string>> {
+    const statuses: Record<string, string> = {};
+    for (const [key, name] of Object.entries(IT_COMPANY_PROFILE_STEPS)) {
+      const button = this.itStepButton(key as keyof typeof IT_COMPANY_PROFILE_STEPS);
+      if (!(await button.count())) continue;
+      const text = (await button.innerText()).replace(/\s+/g, ' ').replace(name, '').trim();
+      statuses[name] = text || '(no status)';
+    }
+    return statuses;
   }
 }
