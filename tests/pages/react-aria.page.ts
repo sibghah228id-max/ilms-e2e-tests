@@ -116,11 +116,17 @@ export class ReactAriaPage {
    * anything, so calling this changes nothing.
    */
   async optionNames(combo: Locator): Promise<string[]> {
-    await combo.click();
-    if ((await combo.getAttribute('aria-expanded')) !== 'true') await this.page.keyboard.press('ArrowDown');
     const listbox = this.page.getByRole('listbox');
-    await expect(listbox).toBeVisible({ timeout: 15_000 });
-    await expect(this.page.getByRole('option').first()).toBeVisible({ timeout: 15_000 });
+    // A react-aria combobox does not open while its option list is still empty, and the list is
+    // fetched after the form renders (the job form's City list waits for the company profile). A
+    // single open attempt made too early never recovers, so the open is retried until options show.
+    await expect(async () => {
+      if (!(await listbox.isVisible())) {
+        await combo.click();
+        if ((await combo.getAttribute('aria-expanded')) !== 'true') await this.page.keyboard.press('ArrowDown');
+      }
+      await expect(this.page.getByRole('option').first()).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] });
 
     const enabledOptions = this.page.getByRole('option').and(this.page.locator(':not([aria-disabled="true"])'));
     const names = (await enabledOptions.allInnerTexts())
