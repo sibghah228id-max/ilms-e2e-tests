@@ -27,6 +27,9 @@ const REQUIREMENT_NOTICE = /qualificat|degree|master|bachelor|phd|eligib|require
  */
 const QUALIFICATION_LABEL = /^(minimum\s+)?qualification(\s+required)?$/i;
 
+/** The cards the "AI Resource" popup offers, in the order the job page lists them. */
+export const AI_RESOURCE_CARDS = ['AI Mock Test', 'AI Interview Simulation', 'Smart Resource Engine'] as const;
+
 /**
  * One job posted on the portal: /jobs/<slug>, reached from a card's "View Details".
  *
@@ -241,6 +244,106 @@ export class StudentPrivateJobPage {
 
     await expect(dialog, `the dialog saying "${said.slice(0, 60)}" should close`).toHaveCount(0, { timeout: 30_000 });
     return said;
+  }
+
+  // ---- AI Resource ---------------------------------------------------------------------------
+
+  /** The "AI Resource" action on the job page, which opens the popup below. */
+  get aiResource(): Locator {
+    return this.root.getByRole('button', { name: /AI Resource/i }).locator('visible=true');
+  }
+
+  /**
+   * The popup "AI Resource" opens. Taken as whatever dialog is up rather than by a title of its
+   * own, because openAiResource() checks nothing is open before it clicks - so the dialog that is
+   * there afterwards is the one that click opened. That keeps a missing card reported as a missing
+   * card, instead of as a popup that could not be found.
+   */
+  get aiResourceDialog(): Locator {
+    return this.page.getByRole('dialog').locator('visible=true');
+  }
+
+  /**
+   * One of the popup's cards, by the name it is headed with. Each card is headed by an `h3`
+   * (verified against staging on 2026-10-27), and the whole card is itself one button - the
+   * "Start test" / "Start interview" / "View plan" wording inside it is not a button of its own.
+   */
+  aiResourceCard(name: string): Locator {
+    return this.aiResourceDialog.getByRole('heading', { level: 3, name, exact: true });
+  }
+
+  /** The clickable card for `name`: the button the heading sits in. */
+  aiResourceCardButton(name: string): Locator {
+    // `has` is resolved inside each button, so the heading is matched from the page root here
+    // rather than through aiResourceCard(), whose dialog prefix would never be found in a button.
+    return this.aiResourceDialog
+      .locator('button')
+      .filter({ has: this.page.getByRole('heading', { level: 3, name, exact: true }) });
+  }
+
+  /**
+   * Starts the AI Mock Test from the open popup - the card click is the "Start test" the card
+   * shows. What follows is the AI Mock Test sheet; see AiMockTestSheet.
+   */
+  async startAiMockTest() {
+    const card = this.aiResourceCardButton('AI Mock Test');
+    await expect(card.first(), 'the popup should offer the "AI Mock Test" card').toBeVisible({ timeout: 30_000 });
+    await card.first().click();
+  }
+
+  // ---- Timeline ------------------------------------------------------------------------------
+
+  /**
+   * The "Timeline" card in the job's side column: the application's own history, which the portal
+   * adds an entry to for each thing that happens to it ("Application Submitted / Applied / Applied
+   * to <job>", and an entry for a completed AI Mock Test).
+   *
+   * The heading sits in the card's header strip, so the card itself is two levels up from it.
+   */
+  get timeline(): Locator {
+    return this.root
+      .getByRole('heading', { level: 2, name: 'Timeline', exact: true })
+      .locator('xpath=ancestor::div[2]');
+  }
+
+  /** Everything the Timeline currently reads, as one string. */
+  async timelineText(): Promise<string> {
+    return (await this.timeline.innerText()).replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * The Timeline carries an entry matching `pattern`.
+   *
+   * Given a retrying assertion rather than a one-off read: an entry the portal writes after an
+   * assessment can land a little after the page it was triggered from, so this keeps looking for
+   * the length of its timeout instead of failing on the first look.
+   */
+  async expectTimelineEntry(pattern: RegExp, what: string, timeout = 90_000) {
+    await expect(this.timeline, 'the job page should carry a Timeline').toBeVisible({ timeout: 60_000 });
+    await expect(this.timeline.getByText(pattern).first(), what).toBeVisible({ timeout });
+  }
+
+  /** Opens the "AI Resource" popup, having first made sure nothing else was already open. */
+  async openAiResource() {
+    await expect(
+      this.page.getByRole('dialog'),
+      'nothing should already be open when "AI Resource" is clicked',
+    ).toHaveCount(0);
+
+    await expect(this.aiResource.first(), 'the job page should offer "AI Resource"').toBeVisible({ timeout: 30_000 });
+    await this.aiResource.first().click();
+    await expect(this.aiResourceDialog.first(), '"AI Resource" should open a popup').toBeVisible({ timeout: 30_000 });
+  }
+
+  /** The popup offers all three cards; returns them in the order they are expected. */
+  async expectAiResourceCards(): Promise<string[]> {
+    for (const card of AI_RESOURCE_CARDS) {
+      await expect(
+        this.aiResourceCard(card).first(),
+        `the "AI Resource" popup should offer the "${card}" card`,
+      ).toBeVisible({ timeout: 30_000 });
+    }
+    return [...AI_RESOURCE_CARDS];
   }
 
   /** "Jobs" in the breadcrumb, which goes back to the listing. */

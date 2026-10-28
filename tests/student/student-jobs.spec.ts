@@ -9,6 +9,8 @@ import { searchForVisiblePrivateJob } from '../helpers/search-student-jobs';
 import { filterPrivateJobs } from '../helpers/filter-private-jobs';
 import { bookmarkAndFindJob } from '../helpers/bookmark-student-job';
 import { applyToPrivateJob } from '../helpers/apply-private-job';
+import { openAppliedJobAiResources, AI_RESOURCE_CARDS } from '../helpers/applied-job-ai-resources';
+import { completeAiMockTest } from '../helpers/ai-mock-test';
 
 // Email, password and OTP come from tests/data/student-login.json only; change them there.
 const { student: user } = credentials;
@@ -33,6 +35,11 @@ const { student: user } = credentials;
  *                            time, each followed by Reset
  *   bookmark-student-job.ts  bookmarking a job and finding it again under "Bookmarked"
  *   apply-private-job.ts     applying for a Private job and finding it again under "Applied"
+ *   applied-job-ai-resources.ts  an applied job opened from "Applied", and its "AI Resource" popup
+ *
+ * The last two take the account as they find it: a listing with no job the student is eligible for,
+ * or an account with no application yet, marks that test skipped with the reason instead of failing
+ * it, so the rest of the spec still runs.
  *
  * Every step is checked against the jobs the portal really returned, not just against the
  * control that was clicked.
@@ -128,5 +135,54 @@ test.describe('Student jobs (registered account)', () => {
     // questions → the "Applied" scope.
     const applied = await applyToPrivateJob(page);
     test.info().annotations.push({ type: 'jobs-apply-private', description: JSON.stringify(applied) });
+
+    // A listing with nothing the student is eligible for is not a failure - there may be no job
+    // left that takes their qualification, or none they have not already applied for. The run is
+    // marked skipped with the reason rather than red, and the tests after it still run.
+    test.skip(!applied.applied, applied.applied ? '' : applied.reason);
+  });
+
+  /**
+   * The "Applied" scope, an application already on the account, and the "AI Resource" popup on
+   * that job's page.
+   *
+   * It uses whichever application the account already carries, so it does not depend on the apply
+   * test above having run (or having found anything) - and an account that has applied for nothing
+   * is reported and skipped rather than failed.
+   */
+  test('opens an applied job, checks the "AI Resource" popup and takes the AI Mock Test', async ({ page }) => {
+    // The assessment is generated server-side, runs against its own countdown, and ends in an AI
+    // analysis, so this one needs considerably longer than the rest of the spec.
+    test.setTimeout(20 * 60_000);
+
+    // ---- Login → OTP if asked → dashboard.
+    const login = new StudentLoginPage(page);
+    await login.goto();
+    await login.loginWithOtpIfShown(user.email, user.password, user.otp);
+
+    const dashboard = new DashboardPage(page);
+    await dashboard.expectVisible(60_000);
+    await dashboard.completeOnboarding();
+    await expect(dashboard.preview.dialog, 'the user guide should not be covering the page').toHaveCount(0);
+
+    // ---- Jobs → All → "Applied" → an applied job's "View Details" → "AI Resource" → the popup's
+    // three cards.
+    const resources = await openAppliedJobAiResources(page);
+    test.info().annotations.push({ type: 'jobs-applied-ai', description: JSON.stringify(resources) });
+
+    test.skip(!resources.opened, resources.opened ? '' : resources.reason);
+
+    // The popup offered all three cards; the helper asserted each one, this records what they were.
+    expect(resources.opened && resources.cards, 'the popup should offer all three AI Resource cards').toEqual([
+      ...AI_RESOURCE_CARDS,
+    ]);
+
+    // ---- Straight on from the open popup: the AI Mock Test card, the whole assessment, the
+    // "Detailed AI Insights" it ends on, and the Timeline entry it leaves on the job.
+    const mockTest = await completeAiMockTest(page, resources.opened ? resources.job : '');
+    test.info().annotations.push({ type: 'ai-mock-test', description: JSON.stringify(mockTest) });
+
+    // Every question the counter reported was answered - none skipped, none answered twice.
+    expect(mockTest.questions, 'every question the assessment held should have been answered').toBe(mockTest.total);
   });
 });

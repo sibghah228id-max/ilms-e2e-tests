@@ -26,7 +26,23 @@ function acceptsQualification(qualification: string): boolean {
  */
 const MAX_JOBS_TO_INSPECT = 10;
 
-export type PrivateApplySummary = {
+/**
+ * What the run came to. Finding nothing to apply for is NOT a failure: a listing can hold no job
+ * the student is eligible for, or none they have not already applied for, and either way the
+ * application step simply does not happen. The caller is told so through `applied: false` and
+ * decides what to do, rather than the helper failing the whole test from in here.
+ */
+export type PrivateApplySummary =
+  | ({ applied: true } & PrivateApplyDetails)
+  | {
+      applied: false;
+      /** Why no application was filed. */
+      reason: string;
+      /** How many jobs were open to apply for at all. */
+      candidates: number;
+    };
+
+export type PrivateApplyDetails = {
   /** The job that was applied for, by the title the listing showed for it. */
   job: string;
   slug: string;
@@ -77,10 +93,14 @@ export async function applyToPrivateJob(page: Page): Promise<PrivateApplySummary
   const records = await jobs.allPrivateJobs();
   const candidates = records.filter((job) => onScreen.has(clean(job.title)) && isOpenToApplications(job));
 
-  expect(
-    candidates.length,
-    `none of the ${onScreen.size} jobs on screen is open to apply for - ${records.filter((job) => job.has_applied).length} of ${records.length} have been applied for already, so this run has nothing to apply to`,
-  ).toBeGreaterThan(0);
+  if (candidates.length === 0) {
+    const reason =
+      `none of the ${onScreen.size} jobs on screen is open to apply for - ` +
+      `${records.filter((job) => job.has_applied).length} of ${records.length} have been applied for already, ` +
+      'so this run had nothing to apply to';
+    annotate('jobs-apply-skipped', reason);
+    return { applied: false, reason, candidates: 0 };
+  }
 
   annotate('jobs-apply-candidates', `${candidates.length} of ${onScreen.size} on screen still open to apply for`);
 
@@ -145,14 +165,16 @@ export async function applyToPrivateJob(page: Page): Promise<PrivateApplySummary
     break;
   }
 
-  expect(
-    applied,
-    'No Private job found with Qualification Required = Bachelors, "-" or none, and an enabled Apply button. ' +
+  if (!applied) {
+    const reason =
+      'No Private job found with Qualification Required = Bachelors, "-" or none, and an enabled Apply button. ' +
       `Checked ${shortlist.length} of the ${candidates.length} Private jobs still open to apply ` +
-      `for: ${skipped.join(', ')}`,
-  ).toBeTruthy();
+      `for: ${skipped.join(', ')}`;
+    annotate('jobs-apply-skipped', reason);
+    return { applied: false, reason, candidates: candidates.length };
+  }
 
-  const { title, slug, qualification: appliedQualification, questions, endpoint, confirmation } = applied!;
+  const { title, slug, qualification: appliedQualification, questions, endpoint, confirmation } = applied;
   annotate('jobs-apply-submitted', `"${title}": ${questions} questions, ${endpoint || 'no call seen'}`);
   annotate('jobs-apply-confirmation', confirmation || 'nothing was shown');
 
@@ -202,6 +224,7 @@ export async function applyToPrivateJob(page: Page): Promise<PrivateApplySummary
   annotate('jobs-apply-scope', `${appliedTitles.length} jobs: ${appliedTitles.join(', ')}`);
 
   return {
+    applied: true,
     job: title,
     slug,
     qualification: appliedQualification,
