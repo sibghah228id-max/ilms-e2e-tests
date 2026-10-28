@@ -27,6 +27,16 @@ const REQUIREMENT_NOTICE = /qualificat|degree|master|bachelor|phd|eligib|require
  */
 const QUALIFICATION_LABEL = /^(minimum\s+)?qualification(\s+required)?$/i;
 
+/** One entry on a job's Timeline. */
+export type TimelineEntry = {
+  /** The entry's number; the newest has the highest. */
+  number: number;
+  title: string;
+  detail: string;
+  /** The score a completed assessment came to, e.g. "22%"; empty for any other entry. */
+  score: string;
+};
+
 /** The cards the "AI Resource" popup offers, in the order the job page lists them. */
 export const AI_RESOURCE_CARDS = ['AI Mock Test', 'AI Interview Simulation', 'Smart Resource Engine'] as const;
 
@@ -286,8 +296,16 @@ export class StudentPrivateJobPage {
    * shows. What follows is the AI Mock Test sheet; see AiMockTestSheet.
    */
   async startAiMockTest() {
-    const card = this.aiResourceCardButton('AI Mock Test');
-    await expect(card.first(), 'the popup should offer the "AI Mock Test" card').toBeVisible({ timeout: 30_000 });
+    await this.startAiResource('AI Mock Test');
+  }
+
+  /**
+   * Starts one of the popup's resources by clicking its card - the card is the "Start test" /
+   * "Start interview" / "View plan" it shows.
+   */
+  async startAiResource(name: (typeof AI_RESOURCE_CARDS)[number]) {
+    const card = this.aiResourceCardButton(name);
+    await expect(card.first(), `the popup should offer the "${name}" card`).toBeVisible({ timeout: 30_000 });
     await card.first().click();
   }
 
@@ -309,6 +327,32 @@ export class StudentPrivateJobPage {
   /** Everything the Timeline currently reads, as one string. */
   async timelineText(): Promise<string> {
     return (await this.timeline.innerText()).replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * The Timeline, one entry at a time, newest first. Each entry reads as its number ("11"), its
+   * title ("Interview Completed"), a line about it ("Mock interview completed for <job>"), when it
+   * happened, and - for a completed assessment - the score it came to ("22%").
+   */
+  async timelineEntries(): Promise<TimelineEntry[]> {
+    const lines = (await this.timeline.innerText())
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const entries: TimelineEntry[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^\d{1,3}$/.test(lines[i])) continue;
+      const next = lines.findIndex((line, at) => at > i && /^\d{1,3}$/.test(line));
+      const rest = lines.slice(i + 1, next === -1 ? undefined : next);
+      entries.push({
+        number: Number(lines[i]),
+        title: rest[0] ?? '',
+        detail: rest[1] ?? '',
+        score: rest.find((line) => /^\d+%$/.test(line)) ?? '',
+      });
+    }
+    return entries;
   }
 
   /**

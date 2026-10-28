@@ -12,6 +12,11 @@ export type AiMockTestSummary = {
   analysed: boolean;
   /** What the Timeline read once the page had been reloaded. */
   timeline: string;
+  /**
+   * Set when the application had no mock test attempt left - the sheet's own message - in which
+   * case nothing was taken and the rest of the summary is empty.
+   */
+  attemptsUsedUp?: string;
 };
 
 /**
@@ -40,7 +45,16 @@ export async function completeAiMockTest(page: Page, job: string): Promise<AiMoc
   await jobPage.startAiMockTest();
 
   // ---- The questions are generated server-side; a test an earlier run generated is served at once.
-  await sheet.waitUntilPrepared();
+  const attemptsUsedUp = await sheet.waitUntilPrepared();
+
+  // ---- No attempt left on this application: not a failure, just reported. The message goes to the
+  // console and the report, and the test ends here.
+  if (attemptsUsedUp) {
+    console.log(`[ai-mock-test] "${job}": ${attemptsUsedUp} The AI Mock Test was not taken.`);
+    annotate('ai-mock-test-attempts-used', `"${job}": ${attemptsUsedUp}`);
+    return { job, questions: 0, total: 0, analysed: false, timeline: '', attemptsUsedUp };
+  }
+
   await sheet.beginAssessment();
 
   const { total } = await sheet.position();

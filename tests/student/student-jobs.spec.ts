@@ -11,6 +11,7 @@ import { bookmarkAndFindJob } from '../helpers/bookmark-student-job';
 import { applyToPrivateJob } from '../helpers/apply-private-job';
 import { openAppliedJobAiResources, AI_RESOURCE_CARDS } from '../helpers/applied-job-ai-resources';
 import { completeAiMockTest } from '../helpers/ai-mock-test';
+import { takeAiInterviewOnAppliedJob } from '../helpers/ai-interview';
 
 // Email, password and OTP come from tests/data/student-login.json only; change them there.
 const { student: user } = credentials;
@@ -36,6 +37,8 @@ const { student: user } = credentials;
  *   bookmark-student-job.ts  bookmarking a job and finding it again under "Bookmarked"
  *   apply-private-job.ts     applying for a Private job and finding it again under "Applied"
  *   applied-job-ai-resources.ts  an applied job opened from "Applied", and its "AI Resource" popup
+ *   ai-mock-test.ts          the AI Mock Test taken from that popup, and its Timeline entry
+ *   ai-interview.ts          the AI Interview Simulation taken from that popup, and its Timeline entries
  *
  * The last two take the account as they find it: a listing with no job the student is eligible for,
  * or an account with no application yet, marks that test skipped with the reason instead of failing
@@ -182,7 +185,50 @@ test.describe('Student jobs (registered account)', () => {
     const mockTest = await completeAiMockTest(page, resources.opened ? resources.job : '');
     test.info().annotations.push({ type: 'ai-mock-test', description: JSON.stringify(mockTest) });
 
+    // All 3 attempts on this application already used: reported in the console, not failed.
+    if (mockTest.attemptsUsedUp) return;
+
     // Every question the counter reported was answered - none skipped, none answered twice.
     expect(mockTest.questions, 'every question the assessment held should have been answered').toBe(mockTest.total);
+  });
+
+  /**
+   * The same applied job and "AI Resource" popup, this time for the AI Interview Simulation: the
+   * whole interview, its result and feedback, and the "Interview Started" / "Interview Completed"
+   * entries it leaves on the job's Timeline.
+   *
+   * Like the test above it uses whichever application the account already carries, and an account
+   * that has applied for nothing is reported and skipped rather than failed. An application only
+   * allows 3 interviews; once they are used, that is shown in the console and the test passes.
+   */
+  test('opens an applied job, takes the AI Interview Simulation and finds it on the Timeline', async ({ page }) => {
+    // The interview is generated server-side, runs against its own countdown, and ends in an AI
+    // analysis, so this one needs considerably longer than the rest of the spec.
+    test.setTimeout(20 * 60_000);
+
+    // ---- Login → OTP if asked → dashboard.
+    const login = new StudentLoginPage(page);
+    await login.goto();
+    await login.loginWithOtpIfShown(user.email, user.password, user.otp);
+
+    const dashboard = new DashboardPage(page);
+    await dashboard.expectVisible(60_000);
+    await dashboard.completeOnboarding();
+    await expect(dashboard.preview.dialog, 'the user guide should not be covering the page').toHaveCount(0);
+
+    // ---- Jobs → All → "Applied" → an applied job → "AI Resource" →
+    // the AI Interview Simulation card, every question, the analysis and result, and - after a
+    // reload - both of its Timeline entries.
+    const interview = await takeAiInterviewOnAppliedJob(page);
+    test.info().annotations.push({ type: 'ai-interview', description: JSON.stringify(interview) });
+
+    // All 3 attempts on this application already used: reported in the console, not failed.
+    if (!interview.taken && interview.attemptsUsedUp) return;
+
+    test.skip(!interview.taken, interview.taken ? '' : interview.reason);
+    if (!interview.taken) return;
+
+    // Every question the intro announced was answered - none skipped, none answered twice.
+    expect(interview.questions, 'every question the interview asked should have been answered').toBe(interview.total);
   });
 });
